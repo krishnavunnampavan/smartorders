@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ssl
-import re
+from urllib.parse import urlparse, urlunparse
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from sqlalchemy.pool import NullPool
@@ -11,28 +11,36 @@ settings = get_settings()
 
 def _build_engine_args(raw_url: str):
     """
-    Return (engine_url, connect_args) ready for create_engine().
+    Normalize any postgresql:// URL for pg8000.
 
-    pg8000 is a pure-Python PostgreSQL driver — no C extensions, no
-    pg_config, works on any Python version.  SQLAlchemy needs the
-    'postgresql+pg8000://' prefix, and SSL is passed as ssl_context
-    rather than a URL parameter.
+    Neon, Supabase and Railway append ?sslmode=require&channel_binding=require
+    (and sometimes more) to their connection strings.  pg8000 doesn't accept
+    these as URL query params — it needs ssl passed via connect_args, and it
+    errors out or misparses the database name if unknown params are left in
+    the URL.
+
+    Strategy: parse the URL with urlparse, drop the entire query string, then
+    inject ssl_context through connect_args for any non-local host.
     """
-    url = raw_url
+    url = raw_url.strip()
 
-    # Normalize Heroku/Render/Railway style 'postgres://' → 'postgresql://'
+    # Normalize Heroku/Render/Railway short form
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
 
     connect_args: dict = {}
 
     if url.startswith("postgresql://") or url.startswith("postgresql+"):
-        # Strip sslmode from query string — pg8000 ignores it and it
-        # causes an "unexpected keyword argument" error at connect time.
-        url = re.sub(r"[?&]sslmode=[^&]*", "", url).rstrip("?&")
+        parsed = urlparse(url)
 
-        # Add SSL for any non-local database (Neon, Supabase, Railway…)
-        is_local = any(h in url for h in ("localhost", "127.0.0.1", "db:5432", "@db/"))
+        # Drop ALL query params — pg8000 doesn't understand sslmode,
+        # channel_binding, etc., and leaving them in corrupts the db name.
+        clean = parsed._replace(query="", fragment="")
+        url = urlunparse(clean)
+
+        # SSL for any cloud host (not localhost / docker internal)
+        hostname = parsed.hostname or ""
+        is_local = hostname in ("localhost", "127.0.0.1", "db") or hostname.startswith("db:")
         if not is_local:
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
@@ -48,7 +56,7 @@ def _build_engine_args(raw_url: str):
 
 _engine_url, _connect_args = _build_engine_args(settings.database_url)
 
-# NullPool: required for serverless — each invocation gets its own connection.
+# NullPool: each serverless invocation gets its own connection; no idle pool.
 engine = create_engine(
     _engine_url,
     poolclass=NullPool,

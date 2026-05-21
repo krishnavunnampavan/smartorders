@@ -9,7 +9,7 @@ Base = _db.Base
 
 from app.routers import (
     companies, products, orders, catalog,
-    ai_parse, share_links, settings, inventory,
+    ai_parse, share_links, settings, inventory, scraper,
 )
 
 # ALLOWED_ORIGINS env var: comma-separated list of allowed origins.
@@ -49,7 +49,7 @@ app.add_middleware(
 
 for router_module in [
     companies, products, orders, catalog,
-    ai_parse, share_links, settings, inventory,
+    ai_parse, share_links, settings, inventory, scraper,
 ]:
     app.include_router(router_module.router)
 
