@@ -27,7 +27,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://smartorders.vercel.app",        # ← replace with your actual Vercel URL
+        "https://*.vercel.app",                  # all Vercel preview deploys
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
