@@ -6,14 +6,43 @@ from app.config import get_settings
 
 settings = get_settings()
 
-# NullPool is required for serverless environments (Vercel/AWS Lambda).
-# Each function invocation opens and closes its own connection — no pooling.
-engine = create_engine(
-    settings.database_url,
-    poolclass=NullPool,
-    pool_pre_ping=True,
-    connect_args={"sslmode": "require"} if settings.database_url.startswith("postgresql") else {},
+
+def _resolve_db_url(url: str) -> str:
+    """
+    Normalize the database URL to use the correct SQLAlchemy driver prefix.
+
+    Neon / Supabase / Railway all issue URLs starting with 'postgresql://' or
+    'postgres://' which SQLAlchemy maps to psycopg2 by default.  We want to
+    use psycopg3 (psycopg[binary]) on Vercel because psycopg2-binary has no
+    pre-built wheel for Python 3.12+.  If psycopg3 is importable we rewrite
+    the prefix; if only psycopg2 is available we leave the URL alone.
+    """
+    # Normalize Heroku-style 'postgres://' → 'postgresql://'
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+
+    if not url.startswith("postgresql://"):
+        return url  # sqlite or already prefixed
+
+    try:
+        import psycopg  # noqa: F401  psycopg3
+        return "postgresql+psycopg://" + url[len("postgresql://"):]
+    except ImportError:
+        pass
+
+    return url  # fall back to psycopg2 default
+
+
+_db_url = _resolve_db_url(settings.database_url)
+
+_connect_args = (
+    {"sslmode": "require"}
+    if _db_url.startswith("postgresql") and "localhost" not in _db_url and "127.0.0.1" not in _db_url
+    else {}
 )
+
+# NullPool: each serverless invocation opens/closes its own connection.
+engine = create_engine(_db_url, poolclass=NullPool, pool_pre_ping=True, connect_args=_connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
