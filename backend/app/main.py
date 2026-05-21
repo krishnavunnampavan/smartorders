@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,11 +12,24 @@ from app.routers import (
     ai_parse, share_links, settings, inventory,
 )
 
+# ALLOWED_ORIGINS env var: comma-separated list of allowed origins.
+# Set it in Vercel Project Settings → Environment Variables.
+# Defaults to allowing all origins if not set.
+_origins_env = os.getenv("ALLOWED_ORIGINS", "*")
+ALLOWED_ORIGINS = (
+    ["*"] if _origins_env == "*"
+    else [o.strip() for o in _origins_env.split(",") if o.strip()]
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create all tables on startup (for dev; prod uses Alembic)
-    Base.metadata.create_all(bind=_db.engine)
+    # Auto-create any missing tables on cold start.
+    # Safe to run on every invocation — it's a no-op if tables exist.
+    try:
+        Base.metadata.create_all(bind=_db.engine)
+    except Exception:
+        pass  # DB might not be reachable yet; Alembic handles migrations
     yield
 
 
@@ -27,12 +41,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "https://smartorders.vercel.app",        # ← replace with your actual Vercel URL
-        "https://*.vercel.app",                  # all Vercel preview deploys
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

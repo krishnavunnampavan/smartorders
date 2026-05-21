@@ -1,11 +1,19 @@
 from __future__ import annotations
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.pool import NullPool
 from app.config import get_settings
 
 settings = get_settings()
 
-engine = create_engine(settings.database_url, pool_pre_ping=True)
+# NullPool is required for serverless environments (Vercel/AWS Lambda).
+# Each function invocation opens and closes its own connection — no pooling.
+engine = create_engine(
+    settings.database_url,
+    poolclass=NullPool,
+    pool_pre_ping=True,
+    connect_args={"sslmode": "require"} if settings.database_url.startswith("postgresql") else {},
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -22,7 +30,6 @@ def get_db():
 
 
 def get_setting(key: str) -> str | None:
-    """Retrieve a value from app_settings table."""
     db = SessionLocal()
     try:
         result = db.execute(

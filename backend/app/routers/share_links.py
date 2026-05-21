@@ -83,11 +83,14 @@ def view_shared_order(token: str, db: Session = Depends(get_db)):
 @router.get("/pdf/{token}")
 def download_pdf(token: str, db: Session = Depends(get_db)):
     order_data = view_shared_order(token, db)
-    pdf_bytes = generate_order_pdf(order_data)
+    content = generate_order_pdf(order_data)
+    is_html = content.startswith(b"<")
+    media_type = "text/html" if is_html else "application/pdf"
+    ext = "html" if is_html else "pdf"
     return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="order-{token[:8]}.pdf"'},
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="order-{token[:8]}.{ext}"'},
     )
 
 
