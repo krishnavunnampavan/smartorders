@@ -37,3 +37,6 @@ logs/
 
 # Docker
 .docker/
+backend/test.db
+backend/test.db-shm
+backend/test.db-wal
