@@ -17,17 +17,14 @@ const nav = [
 
 export default function Sidebar() {
   return (
-    <aside className="w-56 shrink-0 h-screen sticky top-0 flex flex-col bg-[#161b22] border-r border-[rgba(48,54,61,0.8)]">
+    <aside className="hidden lg:flex w-56 shrink-0 h-screen sticky top-0 flex-col bg-[#161b22] border-r border-[rgba(48,54,61,0.8)]">
       {/* Logo */}
       <div className="px-5 py-5 border-b border-[rgba(48,54,61,0.8)]">
-        <div className="text-accent-blue font-bold text-lg tracking-tight">
-          🍾 LiquorStore Pro
-        </div>
+        <div className="text-[#58a6ff] font-bold text-lg tracking-tight">🍾 LiquorStore Pro</div>
         <div className="text-xs text-[#8b949e] mt-0.5">Smart Stock Ordering</div>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 py-4 px-3 space-y-1">
+      <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
         {nav.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
@@ -48,7 +45,7 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      <div className="px-4 py-4 text-xs text-[#8b949e] border-t border-[rgba(48,54,61,0.8)]">
+      <div className="px-4 py-3 text-xs text-[#8b949e] border-t border-[rgba(48,54,61,0.8)]">
         v1.0.0
       </div>
     </aside>

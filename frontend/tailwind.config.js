@@ -22,6 +22,16 @@ export default {
         },
         border: 'rgba(48, 54, 61, 0.8)',
       },
+      // iOS safe-area spacing
+      spacing: {
+        'safe-top': 'env(safe-area-inset-top)',
+        'safe-bottom': 'env(safe-area-inset-bottom)',
+        'safe-left': 'env(safe-area-inset-left)',
+        'safe-right': 'env(safe-area-inset-right)',
+      },
+      screens: {
+        xs: '375px',
+      },
     },
   },
   plugins: [],

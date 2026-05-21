@@ -1,9 +1,11 @@
-import React from 'react'
+import React, { Suspense, lazy } from 'react'
 import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'react-hot-toast'
 import App from './App'
 import './index.css'
+
+const InstallPrompt = lazy(() => import('./components/shared/InstallPrompt'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,6 +27,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           },
         }}
       />
+      {/* PWA install prompt + update notification */}
+      <Suspense fallback={null}>
+        <InstallPrompt />
+      </Suspense>
     </QueryClientProvider>
   </React.StrictMode>
 )

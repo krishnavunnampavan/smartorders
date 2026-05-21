@@ -2,6 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
+/* iOS safe-area support */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .safe-area-inset-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .h-safe-bottom {
+    height: env(safe-area-inset-bottom);
+  }
+}
+
+/* Minimum touch target size (Apple HIG / WCAG) */
+button, a, [role="button"] {
+  min-height: 44px;
+}
+
+/* Smooth scrolling & momentum on iOS */
+* {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Remove tap highlight on mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
 :root {
   --bg-primary: #0d1117;
   --bg-secondary: #161b22;
