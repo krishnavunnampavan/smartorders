@@ -1,4 +1,6 @@
 from __future__ import annotations
+import ssl
+import re
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from sqlalchemy.pool import NullPool
@@ -7,42 +9,52 @@ from app.config import get_settings
 settings = get_settings()
 
 
-def _resolve_db_url(url: str) -> str:
+def _build_engine_args(raw_url: str):
     """
-    Normalize the database URL to use the correct SQLAlchemy driver prefix.
+    Return (engine_url, connect_args) ready for create_engine().
 
-    Neon / Supabase / Railway all issue URLs starting with 'postgresql://' or
-    'postgres://' which SQLAlchemy maps to psycopg2 by default.  We want to
-    use psycopg3 (psycopg[binary]) on Vercel because psycopg2-binary has no
-    pre-built wheel for Python 3.12+.  If psycopg3 is importable we rewrite
-    the prefix; if only psycopg2 is available we leave the URL alone.
+    pg8000 is a pure-Python PostgreSQL driver — no C extensions, no
+    pg_config, works on any Python version.  SQLAlchemy needs the
+    'postgresql+pg8000://' prefix, and SSL is passed as ssl_context
+    rather than a URL parameter.
     """
-    # Normalize Heroku-style 'postgres://' → 'postgresql://'
+    url = raw_url
+
+    # Normalize Heroku/Render/Railway style 'postgres://' → 'postgresql://'
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
 
-    if not url.startswith("postgresql://"):
-        return url  # sqlite or already prefixed
+    connect_args: dict = {}
 
-    try:
-        import psycopg  # noqa: F401  psycopg3
-        return "postgresql+psycopg://" + url[len("postgresql://"):]
-    except ImportError:
-        pass
+    if url.startswith("postgresql://") or url.startswith("postgresql+"):
+        # Strip sslmode from query string — pg8000 ignores it and it
+        # causes an "unexpected keyword argument" error at connect time.
+        url = re.sub(r"[?&]sslmode=[^&]*", "", url).rstrip("?&")
 
-    return url  # fall back to psycopg2 default
+        # Add SSL for any non-local database (Neon, Supabase, Railway…)
+        is_local = any(h in url for h in ("localhost", "127.0.0.1", "db:5432", "@db/"))
+        if not is_local:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_REQUIRED
+            connect_args["ssl_context"] = ctx
+
+        # Force the pg8000 driver prefix
+        if url.startswith("postgresql://"):
+            url = "postgresql+pg8000://" + url[len("postgresql://"):]
+
+    return url, connect_args
 
 
-_db_url = _resolve_db_url(settings.database_url)
+_engine_url, _connect_args = _build_engine_args(settings.database_url)
 
-_connect_args = (
-    {"sslmode": "require"}
-    if _db_url.startswith("postgresql") and "localhost" not in _db_url and "127.0.0.1" not in _db_url
-    else {}
+# NullPool: required for serverless — each invocation gets its own connection.
+engine = create_engine(
+    _engine_url,
+    poolclass=NullPool,
+    pool_pre_ping=True,
+    connect_args=_connect_args,
 )
-
-# NullPool: each serverless invocation opens/closes its own connection.
-engine = create_engine(_db_url, poolclass=NullPool, pool_pre_ping=True, connect_args=_connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
