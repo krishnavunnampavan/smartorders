@@ -1,5 +1,5 @@
 """
-Seed script: reads seed/items_seed.json and bulk-inserts all 4,930 products
+Seed script: reads seed/items_seed.json and bulk-inserts all 5,083 products
 if the products table is empty. Safe to re-run — it is a no-op if rows exist.
 
 Usage:

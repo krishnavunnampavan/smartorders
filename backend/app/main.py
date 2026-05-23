@@ -1,4 +1,6 @@
+import json
 import os
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
@@ -51,11 +53,82 @@ def _run_migrations():
         print(f"[migrations] warning: {exc}")
 
 
+def _seed_products():
+    """Upsert seed products from items_seed.json on cold start.
+
+    Inserts items whose UPC is not yet in the DB; skips existing rows.
+    Also seeds default companies if none exist.
+    """
+    try:
+        from app.models.product import Product
+        from app.models.company import Company
+
+        backend_dir = Path(__file__).parent.parent
+        seed_file = backend_dir / "seed" / "items_seed.json"
+        if not seed_file.exists():
+            return
+
+        with open(seed_file) as f:
+            items = json.load(f)
+
+        db = _db.SessionLocal()
+        try:
+            # Collect existing UPCs to avoid duplicate inserts
+            existing_upcs = {row[0] for row in db.query(Product.sku).all() if row[0]}
+
+            batch = []
+            for item in items:
+                upc = str(item.get("upc", "") or "")
+                if upc and upc in existing_upcs:
+                    continue
+                batch.append(Product(
+                    id=uuid.uuid4(),
+                    name=item["name"],
+                    sku=upc,
+                    barcode=upc,
+                    unit_size=item.get("size", ""),
+                    pack=item.get("pack", ""),
+                    unit_price=float(item.get("price", 0) or 0),
+                    category=item.get("category", "Spirits & Other"),
+                    aliases=[item["name"].lower()],
+                    reorder_level=2,
+                    current_stock=0,
+                    is_active=True,
+                ))
+                if len(batch) >= 500:
+                    db.bulk_save_objects(batch)
+                    db.commit()
+                    batch = []
+
+            if batch:
+                db.bulk_save_objects(batch)
+                db.commit()
+
+            if db.query(Company).count() == 0:
+                defaults = [
+                    {"name": "Southern Glazers", "contact_name": "Sales Rep", "email": "orders@southernglazers.com", "delivery_days": "Mon, Wed, Fri"},
+                    {"name": "RNDC", "contact_name": "Sales Rep", "email": "orders@rndc.com", "delivery_days": "Tue, Thu"},
+                    {"name": "Reyes Beverage", "contact_name": "Sales Rep", "email": "orders@reyesbeverage.com", "delivery_days": "Mon, Wed"},
+                    {"name": "Anheuser-Busch", "contact_name": "Sales Rep", "email": "orders@ab-inbev.com", "delivery_days": "Tue, Fri"},
+                    {"name": "MillerCoors / Molson", "contact_name": "Sales Rep", "email": "orders@molsoncoors.com", "delivery_days": "Mon, Thu"},
+                ]
+                for d in defaults:
+                    db.add(Company(**d))
+                db.commit()
+
+            print(f"[seed] Done — inserted {len(batch) if not batch else 0} products.")
+        finally:
+            db.close()
+    except Exception as exc:
+        print(f"[seed] warning: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Run migrations (adds new columns, creates new tables) on every cold start.
     # Alembic tracks which migrations have already run, so this is always safe.
     _run_migrations()
+    _seed_products()
     yield
 
 
