@@ -24,33 +24,63 @@ ALLOWED_ORIGINS = (
 
 
 def _run_migrations():
-    """Run alembic upgrade head programmatically.
+    """Run alembic upgrade head, handling pre-alembic databases gracefully.
 
-    Works on Vercel (serverless) and Docker alike — no CLI needed.
-    Resolves the alembic.ini path relative to this file so it works
-    regardless of the working directory at runtime.
+    If the DB has tables (created by create_all before alembic was introduced)
+    but no alembic_version tracking table, stamp it to the last migration that
+    create_all() would have applied (002), then run upgrade to add newer ones.
     """
     try:
         from alembic.config import Config
         from alembic import command
+        from sqlalchemy import inspect as sa_inspect
 
-        # backend/app/main.py → backend/
         backend_dir = Path(__file__).parent.parent
         alembic_ini = backend_dir / "alembic.ini"
-
         if not alembic_ini.exists():
-            # Fallback: try one level up (repo root layout)
             alembic_ini = backend_dir.parent / "backend" / "alembic.ini"
 
         cfg = Config(str(alembic_ini))
-        # Override the DB URL so alembic uses the same connection as the app
         cfg.set_main_option("sqlalchemy.url", str(_db.engine.url))
-        # Ensure the script location resolves correctly regardless of cwd
         cfg.set_main_option("script_location", str(backend_dir / "alembic"))
+
+        # Detect DBs that were bootstrapped via create_all() before alembic was wired up:
+        # they have the app tables but no alembic_version table.
+        insp = sa_inspect(_db.engine)
+        existing_tables = set(insp.get_table_names())
+        if "alembic_version" not in existing_tables and "products" in existing_tables:
+            # Stamp to migration 002 (the last one create_all would cover) so that
+            # alembic upgrade head only runs migration 003+ (the missing columns).
+            print("[migrations] Pre-alembic DB detected — stamping to 002 before upgrade.")
+            command.stamp(cfg, "002")
+
         command.upgrade(cfg, "head")
+        print("[migrations] OK — at head.")
     except Exception as exc:
-        # Never crash the app on migration errors — log and continue
         print(f"[migrations] warning: {exc}")
+
+
+def _ensure_columns():
+    """Direct SQL fallback: add new product columns if they somehow still don't exist.
+
+    Uses ADD COLUMN IF NOT EXISTS (PG 9.6+) so it is always safe to run.
+    """
+    try:
+        from sqlalchemy import text
+        with _db.engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE products ADD COLUMN IF NOT EXISTS pack VARCHAR(50)"
+            ))
+            conn.execute(text(
+                "ALTER TABLE products ADD COLUMN IF NOT EXISTS unit_price NUMERIC(10, 2) DEFAULT 0"
+            ))
+            conn.execute(text(
+                "ALTER TABLE products ADD COLUMN IF NOT EXISTS case_price NUMERIC(10, 2)"
+            ))
+            conn.commit()
+        print("[ensure_columns] OK.")
+    except Exception as exc:
+        print(f"[ensure_columns] warning: {exc}")
 
 
 def _seed_products():
@@ -125,10 +155,9 @@ def _seed_products():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Run migrations (adds new columns, creates new tables) on every cold start.
-    # Alembic tracks which migrations have already run, so this is always safe.
-    _run_migrations()
-    _seed_products()
+    _run_migrations()    # alembic upgrade head (stamps pre-alembic DBs first)
+    _ensure_columns()    # ADD COLUMN IF NOT EXISTS failsafe for pack/unit_price/case_price
+    _seed_products()     # upsert 5,083 products from seed JSON
     yield
 
 
