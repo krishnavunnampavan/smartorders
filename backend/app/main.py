@@ -1,5 +1,6 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import app.database as _db
@@ -13,8 +14,6 @@ from app.routers import (
 )
 
 # ALLOWED_ORIGINS env var: comma-separated list of allowed origins.
-# Set it in Vercel Project Settings → Environment Variables.
-# Defaults to allowing all origins if not set.
 _origins_env = os.getenv("ALLOWED_ORIGINS", "*")
 ALLOWED_ORIGINS = (
     ["*"] if _origins_env == "*"
@@ -22,14 +21,41 @@ ALLOWED_ORIGINS = (
 )
 
 
+def _run_migrations():
+    """Run alembic upgrade head programmatically.
+
+    Works on Vercel (serverless) and Docker alike — no CLI needed.
+    Resolves the alembic.ini path relative to this file so it works
+    regardless of the working directory at runtime.
+    """
+    try:
+        from alembic.config import Config
+        from alembic import command
+
+        # backend/app/main.py → backend/
+        backend_dir = Path(__file__).parent.parent
+        alembic_ini = backend_dir / "alembic.ini"
+
+        if not alembic_ini.exists():
+            # Fallback: try one level up (repo root layout)
+            alembic_ini = backend_dir.parent / "backend" / "alembic.ini"
+
+        cfg = Config(str(alembic_ini))
+        # Override the DB URL so alembic uses the same connection as the app
+        cfg.set_main_option("sqlalchemy.url", str(_db.engine.url))
+        # Ensure the script location resolves correctly regardless of cwd
+        cfg.set_main_option("script_location", str(backend_dir / "alembic"))
+        command.upgrade(cfg, "head")
+    except Exception as exc:
+        # Never crash the app on migration errors — log and continue
+        print(f"[migrations] warning: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Auto-create any missing tables on cold start.
-    # Safe to run on every invocation — it's a no-op if tables exist.
-    try:
-        Base.metadata.create_all(bind=_db.engine)
-    except Exception:
-        pass  # DB might not be reachable yet; Alembic handles migrations
+    # Run migrations (adds new columns, creates new tables) on every cold start.
+    # Alembic tracks which migrations have already run, so this is always safe.
+    _run_migrations()
     yield
 
 
