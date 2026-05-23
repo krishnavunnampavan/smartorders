@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, Numeric, String
 from app.utils.db_types import GUID
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -17,7 +17,10 @@ class Product(Base):
     subcategory = Column(String(100))
     brand = Column(String(255))
     unit_size = Column(String(50))
+    pack = Column(String(50))
     case_pack = Column(Integer, default=12)
+    unit_price = Column(Numeric(10, 2), default=0)
+    case_price = Column(Numeric(10, 2))
     company_id = Column(GUID(), ForeignKey("companies.id"))
     reorder_level = Column(Integer, default=2)
     current_stock = Column(Integer, default=0)

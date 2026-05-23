@@ -49,6 +49,45 @@ def match_product(db: Session, name: str, company_id: str | None = None) -> Prod
     return None
 
 
+def match_multiple(db: Session, names: list[str], limit: int = 20) -> list[dict]:
+    """Batch-match a list of names to products. Returns top matches for search."""
+    if not names:
+        return []
+    query_str = names[0].lower() if names else ""
+    products = db.query(Product).filter(Product.is_active == True).all()
+    if not products:
+        return []
+
+    candidates: dict[str, Product] = {}
+    for p in products:
+        candidates[p.name.lower()] = p
+        for alias in (p.aliases or []):
+            candidates[alias.lower()] = p
+
+    try:
+        from rapidfuzz import process, fuzz as _fuzz
+        results = process.extract(query_str, list(candidates.keys()), scorer=_fuzz.WRatio, limit=limit)
+        seen = set()
+        out = []
+        for key, score, _ in results:
+            p = candidates[key]
+            if str(p.id) not in seen:
+                seen.add(str(p.id))
+                out.append({"product": p, "score": score, "confident": score >= 85})
+        return out
+    except ImportError:
+        import difflib
+        matches = difflib.get_close_matches(query_str, list(candidates.keys()), n=limit, cutoff=0.4)
+        seen = set()
+        out = []
+        for key in matches:
+            p = candidates[key]
+            if str(p.id) not in seen:
+                seen.add(str(p.id))
+                out.append({"product": p, "score": 80, "confident": True})
+        return out
+
+
 def save_alias(db: Session, product_id: str, alias: str) -> None:
     product = db.get(Product, product_id)
     if not product:

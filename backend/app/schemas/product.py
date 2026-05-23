@@ -13,7 +13,10 @@ class ProductBase(BaseModel):
     subcategory: Optional[str] = None
     brand: Optional[str] = None
     unit_size: Optional[str] = None
+    pack: Optional[str] = None
     case_pack: int = 12
+    unit_price: Optional[float] = 0.0
+    case_price: Optional[float] = None
     company_id: Optional[UUID] = None
     reorder_level: int = 2
     aliases: list[str] = []

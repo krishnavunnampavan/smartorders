@@ -1,10 +1,35 @@
-import { Bell, Wifi, WifiOff } from 'lucide-react'
+import { Bell, Wifi, WifiOff, Download } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useState, useEffect } from 'react'
 import client from '../../api/client'
 
+function useInstallPrompt() {
+  const [prompt, setPrompt] = useState(null)
+  const [installed, setInstalled] = useState(
+    window.matchMedia('(display-mode: standalone)').matches
+  )
+
+  useEffect(() => {
+    if (installed) return
+    const handler = (e) => { e.preventDefault(); setPrompt(e) }
+    window.addEventListener('beforeinstallprompt', handler)
+    window.addEventListener('appinstalled', () => { setInstalled(true); setPrompt(null) })
+    return () => window.removeEventListener('beforeinstallprompt', handler)
+  }, [installed])
+
+  const install = async () => {
+    if (!prompt) return
+    prompt.prompt()
+    const { outcome } = await prompt.userChoice
+    if (outcome === 'accepted') { setPrompt(null); setInstalled(true) }
+  }
+
+  return { canInstall: !!prompt && !installed, install }
+}
+
 export default function TopBar({ title }) {
   const [online, setOnline] = useState(navigator.onLine)
+  const { canInstall, install } = useInstallPrompt()
 
   useEffect(() => {
     const up = () => setOnline(true)
@@ -23,14 +48,23 @@ export default function TopBar({ title }) {
 
   return (
     <header className="h-14 flex items-center justify-between px-4 lg:px-6 border-b border-[rgba(48,54,61,0.8)] bg-[#0d1117] shrink-0">
-      {/* Mobile: show app name; Desktop: show page title */}
       <div className="flex items-center gap-3">
         <span className="lg:hidden text-[#58a6ff] font-bold text-base">🍾 LiquorPro</span>
         <h1 className="hidden lg:block text-base font-semibold text-[#e6edf3]">{title}</h1>
       </div>
 
-      <div className="flex items-center gap-3">
-        {/* Connectivity indicator */}
+      <div className="flex items-center gap-2">
+        {/* Install button — visible on mobile when installable */}
+        {canInstall && (
+          <button
+            onClick={install}
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-[#58a6ff]/15 text-[#58a6ff] hover:bg-[#58a6ff]/25 transition-colors"
+          >
+            <Download size={13} />
+            <span className="hidden sm:inline">Install App</span>
+          </button>
+        )}
+
         {online ? (
           <Wifi size={16} className="text-green-400 hidden sm:block" />
         ) : (

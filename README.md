@@ -69,5 +69,39 @@ The app auto-falls back to the other provider if one fails.
 | `HOLD` | Price rose ≥ $0.25 | Skip ordering |
 | `STABLE` | Change < threshold | Order normal qty |
 
+## Deploy to Vercel (All-in-One)
+
+LiquorStore Pro can be deployed to Vercel with the frontend and backend running together.
+
+### Prerequisites
+- A PostgreSQL database (free options: [Neon](https://neon.tech), [Supabase](https://supabase.com))
+
+### Steps
+
+1. **Fork / push this repo to GitHub**
+
+2. **Import in Vercel:**
+   - Go to [vercel.com](https://vercel.com) → New Project → Import Git Repository
+   - **Leave all settings as default** — the `vercel.json` handles everything
+
+3. **Set Environment Variables** in Vercel Project Settings:
+   ```
+   DATABASE_URL=postgresql://user:pass@host/dbname    ← from Neon/Supabase
+   SECRET_KEY=<run: python -c "import secrets; print(secrets.token_hex(32))">
+   ```
+
+4. **Deploy** — Vercel will:
+   - Build the React frontend (`frontend/dist`)
+   - Deploy the FastAPI backend as a serverless function (`/api/*`)
+
+5. **After first deploy**, visit your app → **Settings → API Keys** to add your OpenAI / Claude keys.
+
+> **Note:** The first request after deploy runs migrations automatically. Seed data (4,930 products) is pre-included.
+
+### Install as an App (PWA)
+- **Desktop:** Click the "Install App" button in the sidebar, or use your browser's address bar install icon
+- **Mobile:** Open in Safari/Chrome → Share → "Add to Home Screen"
+- Works offline with cached data
+
 ## API Docs
 FastAPI auto-generates interactive docs at `/docs` (Swagger) and `/redoc`.

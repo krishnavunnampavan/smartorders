@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Product, InventoryLog
@@ -9,22 +10,59 @@ from app.schemas.product import ProductCreate, ProductUpdate, ProductOut, StockU
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
+CATEGORIES = [
+    "Beer & RTD", "Wine", "Vodka", "Whiskey & Cognac",
+    "Tequila & Mezcal", "Rum", "Gin", "Liqueurs & Cordials",
+    "Non-Alcoholic", "Tobacco", "Spirits & Other",
+]
+
 
 @router.get("", response_model=list[ProductOut])
 def list_products(
     company_id: Optional[UUID] = None,
     category: Optional[str] = None,
+    search: Optional[str] = None,
     active_only: bool = True,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
     q = db.query(Product)
     if active_only:
-        q = q.filter_by(is_active=True)
+        q = q.filter(Product.is_active == True)
     if company_id:
-        q = q.filter_by(company_id=company_id)
+        q = q.filter(Product.company_id == company_id)
     if category:
-        q = q.filter_by(category=category)
-    return q.order_by(Product.name).all()
+        q = q.filter(Product.category == category)
+    if search:
+        term = f"%{search.lower()}%"
+        q = q.filter(
+            or_(
+                Product.name.ilike(term),
+                Product.sku.ilike(term),
+                Product.brand.ilike(term),
+                Product.barcode.ilike(term),
+            )
+        )
+    total = q.count()
+    items = q.order_by(Product.name).offset((page - 1) * per_page).limit(per_page).all()
+    return items
+
+
+@router.get("/categories")
+def get_categories():
+    return CATEGORIES
+
+
+@router.get("/search", response_model=list[ProductOut])
+def search_products(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(20, le=50),
+    db: Session = Depends(get_db),
+):
+    from app.utils.fuzzy_match import match_multiple
+    results = match_multiple(db, [q], limit=limit)
+    return [r["product"] for r in results if r.get("product")]
 
 
 @router.get("/low-stock", response_model=list[ProductOut])
