@@ -6,6 +6,7 @@ from app.models.catalog_upload import CatalogUpload
 from app.models.order_share_token import OrderShareToken
 from app.models.settings import AppSetting, OrderRule, InventoryLog
 from app.models.knowledge import KnowledgeBase, AIParseLog, UserFeedback
+from app.models.cart import ActiveCart, CartItem, CartActivityLog
 
 __all__ = [
     "Company", "Product", "PriceHistory",
@@ -13,4 +14,5 @@ __all__ = [
     "CatalogUpload", "OrderShareToken",
     "AppSetting", "OrderRule", "InventoryLog",
     "KnowledgeBase", "AIParseLog", "UserFeedback",
+    "ActiveCart", "CartItem", "CartActivityLog",
 ]

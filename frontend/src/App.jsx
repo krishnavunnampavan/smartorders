@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import DashboardPage from './pages/DashboardPage'
 import NewOrderPage from './pages/NewOrderPage'
@@ -10,10 +11,20 @@ import InventoryPage from './pages/InventoryPage'
 import ProductsPage from './pages/ProductsPage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import FloatingOrderCart from './components/shared/FloatingOrderCart'
+import { useCartSync } from './hooks/useCartSync'
+import { useOrderStore } from './store/orderStore'
+
+function CartSyncProvider() {
+  useCartSync()
+  const loadCart = useOrderStore((s) => s.loadCart)
+  useEffect(() => { loadCart() }, [loadCart])
+  return null
+}
 
 export default function App() {
   return (
     <BrowserRouter>
+      <CartSyncProvider />
       <Routes>
         {/* Public — no layout chrome */}
         <Route path="/order/:token" element={<PublicOrderPage />} />

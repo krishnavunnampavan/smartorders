@@ -8,7 +8,6 @@ import toast from 'react-hot-toast'
 import { useOrderStore } from '../../store/orderStore'
 import PriceTagBadge from './PriceTagBadge'
 import { formatCurrency } from '../../utils/formatters'
-import client from '../../api/client'
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function getMonthOptions() {
@@ -58,9 +57,14 @@ function CartItem({ item }) {
     ? item.unit_options.map((u) => u.unit_label)
     : ['Bottle', 'Half Case', 'Case', 'Mixed Case']
 
-  const lineTotal = item.unit_price != null ? item.unit_price * item.quantity : null
-  const dealSavings = item.price_status === 'DEAL' && item.price_change
-    ? Math.abs(item.price_change) * item.quantity * (item.bottles_per_unit || 1)
+  // Server provides line_total; fall back to local calculation
+  const lineTotal = item.line_total != null
+    ? item.line_total
+    : (item.effective_price || item.unit_price || 0) * item.quantity
+
+  const dealSavings = (item.price_status === 'DEAL' || item.price_status === 'RECOVERY_DEAL')
+    && (item.price_change || 0) < 0
+    ? Math.abs(item.price_change) * item.quantity
     : 0
 
   return (
@@ -73,13 +77,13 @@ function CartItem({ item }) {
             {item.price_status && <PriceTagBadge status={item.price_status} />}
             {dealSavings > 0 && (
               <span className="text-green-400 text-[10px] flex items-center gap-0.5">
-                <TrendingDown size={10} />saving ${dealSavings.toFixed(2)}
+                <TrendingDown size={10} />saving {formatCurrency(dealSavings)}
               </span>
             )}
           </div>
         </div>
         <button
-          onClick={() => removeItem(item._key)}
+          onClick={() => removeItem(item.id)}
           className="text-[#8b949e] hover:text-red-400 p-1 shrink-0 -mt-0.5 transition-colors"
         >
           <Trash2 size={13} />
@@ -99,7 +103,7 @@ function CartItem({ item }) {
           onChange={(v) => updateItemUnit(item._key, v)}
         />
         <span className="text-[#484f58] text-[10px] ml-auto">
-          {(item.bottles_per_unit || 1)} btl/unit
+          {item.bottles_per_unit || 1} btl/unit
         </span>
       </div>
 
@@ -117,10 +121,12 @@ function CartItem({ item }) {
           >+</button>
         </div>
         <div className="ml-auto text-right">
-          {lineTotal != null && (
+          {lineTotal > 0 && (
             <p className="text-[#e6edf3] text-xs font-semibold">{formatCurrency(lineTotal)}</p>
           )}
-          <p className="text-[#484f58] text-[10px]">{(item.total_bottles || item.quantity * (item.bottles_per_unit || 1))} bottles total</p>
+          <p className="text-[#484f58] text-[10px]">
+            {item.total_bottles || item.quantity * (item.bottles_per_unit || 1)} bottles total
+          </p>
         </div>
       </div>
     </div>
@@ -169,7 +175,7 @@ function ConfirmSheet({ items, total, totalBottles, dealSavings, onCancel, onCon
         {/* Item preview */}
         <div className="max-h-36 overflow-y-auto space-y-1 rounded-lg bg-[#0d1117] p-2">
           {items.map((item) => (
-            <div key={item._key} className="flex justify-between items-center text-xs px-2 py-1">
+            <div key={item.id || item._key} className="flex justify-between items-center text-xs px-2 py-1">
               <span className="text-[#e6edf3] truncate flex-1 mr-2">{item.product_name}</span>
               <span className="text-[#8b949e] shrink-0 text-[10px]">
                 {item.selected_size} · {item.selected_unit} ×{item.quantity}
@@ -259,52 +265,31 @@ export default function FloatingOrderCart() {
   const [createdOrderId, setCreatedOrderId] = useState(null)
   const location = useLocation()
   const navigate = useNavigate()
-  const { items, clearItems, clearResolvedItems } = useOrderStore()
+  const { items, submitCart } = useOrderStore()
 
   if (location.pathname.startsWith('/order/')) return null
 
   const count = items.length
-  const total = items.reduce((s, i) => s + (i.unit_price || 0) * i.quantity, 0)
+  const total = items.reduce((s, i) => s + (i.line_total || (i.effective_price || i.unit_price || 0) * i.quantity), 0)
   const totalBottles = items.reduce((s, i) => s + (i.total_bottles || i.quantity * (i.bottles_per_unit || 1)), 0)
   const dealSavings = items.reduce((s, i) => {
-    if (i.price_status === 'DEAL' && i.price_change) {
-      return s + Math.abs(i.price_change) * i.quantity * (i.bottles_per_unit || 1)
+    if ((i.price_status === 'DEAL' || i.price_status === 'RECOVERY_DEAL') && (i.price_change || 0) < 0) {
+      return s + Math.abs(i.price_change) * i.quantity
     }
     return s
   }, 0)
-  const dealCount = items.filter((i) => i.price_status === 'DEAL').length
+  const dealCount = items.filter((i) => i.price_status === 'DEAL' || i.price_status === 'RECOVERY_DEAL').length
 
-  const handleConfirm = async (orderMonth, notes) => {
+  const handleConfirm = async () => {
     setSubmitting(true)
     try {
-      const { data: order } = await client.post('/orders', {
-        order_month: orderMonth,
-        notes: notes || null,
-      })
-
-      await Promise.all(
-        items.map((item) =>
-          client.post(`/orders/${order.id}/items`, {
-            product_id: item.product_id,
-            company_id: item.company_id,
-            quantity: item.quantity,
-            source: item.source || 'manual',
-            selected_size: item.selected_size || '750ml',
-            selected_unit: item.selected_unit || 'Case',
-            bottles_per_unit: item.bottles_per_unit || 1,
-          })
-        )
-      )
-      await client.post(`/orders/${order.id}/split`)
-
-      setCreatedOrderId(order.id)
-      clearItems()
-      clearResolvedItems()
-      navigate(`/orders?review=${order.id}`)
+      const result = await submitCart()
+      if (!result) throw new Error('Submit failed')
+      const orderId = result.order_id
+      setCreatedOrderId(orderId)
+      navigate(`/orders?review=${orderId}`)
       toast.success('Order created!')
-
-      // Auto-open master PDF
-      window.open(`/api/orders/${order.id}/pdf/master`, '_blank')
+      window.open(`/api/orders/${orderId}/pdf/master`, '_blank')
     } catch {
       toast.error('Failed to create order')
     } finally {
@@ -404,7 +389,7 @@ export default function FloatingOrderCart() {
                   </p>
                 </div>
               ) : (
-                items.map((item) => <CartItem key={item._key} item={item} />)
+                items.map((item) => <CartItem key={item.id || item._key} item={item} />)
               )}
             </div>
 

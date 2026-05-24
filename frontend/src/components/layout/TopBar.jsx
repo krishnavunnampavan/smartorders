@@ -2,6 +2,34 @@ import { Bell, Wifi, WifiOff, Download } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useState, useEffect } from 'react'
 import client from '../../api/client'
+import { useOrderStore } from '../../store/orderStore'
+
+function CartSyncStatus() {
+  const wsStatus = useOrderStore((s) => s.wsStatus)
+  const count = useOrderStore((s) => s.connectionCount)
+
+  const color = wsStatus === 'connected'
+    ? 'bg-green-500/15 text-green-400 border-green-500/30'
+    : wsStatus === 'connecting'
+    ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30'
+    : 'bg-red-500/15 text-red-400 border-red-500/30'
+
+  const dot = wsStatus === 'connected' ? 'bg-green-400'
+    : wsStatus === 'connecting' ? 'bg-yellow-400 animate-pulse'
+    : 'bg-red-400'
+
+  const label = wsStatus === 'connected'
+    ? count > 1 ? `${count} devices` : 'Live'
+    : wsStatus === 'connecting' ? 'Syncing…'
+    : 'Offline'
+
+  return (
+    <span className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-full border ${color}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+      {label}
+    </span>
+  )
+}
 
 function useInstallPrompt() {
   const [prompt, setPrompt] = useState(null)
@@ -54,6 +82,8 @@ export default function TopBar({ title }) {
       </div>
 
       <div className="flex items-center gap-2">
+        <CartSyncStatus />
+
         {/* Install button — visible on mobile when installable */}
         {canInstall && (
           <button

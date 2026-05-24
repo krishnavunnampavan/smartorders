@@ -77,11 +77,17 @@ export default defineConfig({
     }),
   ],
   server: {
+    host: '0.0.0.0',   // accessible from mobile devices on the same network
     port: 5173,
     proxy: {
       '/api': {
         target: process.env.VITE_API_URL || 'http://localhost:8001',
         changeOrigin: true,
+      },
+      '/ws': {
+        target: process.env.VITE_API_URL || 'http://localhost:8001',
+        changeOrigin: true,
+        ws: true,
       },
     },
   },

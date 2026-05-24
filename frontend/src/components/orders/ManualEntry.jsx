@@ -280,7 +280,7 @@ export default function ManualEntry() {
                   </div>
                   <button
                     className="text-[#8b949e] hover:text-red-400 text-xs transition-colors"
-                    onClick={() => removeItem(orderItem(p.id)?._key)}>
+                    onClick={() => removeItem(orderItem(p.id)?.id)}>
                     Remove
                   </button>
                 </div>

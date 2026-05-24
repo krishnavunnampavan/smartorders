@@ -14,6 +14,8 @@ from app.routers import (
     companies, products, orders, catalog,
     ai_parse, share_links, settings, inventory, scraper, analytics,
 )
+from app.routers import cart as cart_router
+from app.routers import ws_cart as ws_cart_router
 
 # ALLOWED_ORIGINS env var: comma-separated list of allowed origins.
 _origins_env = os.getenv("ALLOWED_ORIGINS", "*")
@@ -155,9 +157,12 @@ def _seed_products():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
     _run_migrations()    # alembic upgrade head (stamps pre-alembic DBs first)
     _ensure_columns()    # ADD COLUMN IF NOT EXISTS failsafe for pack/unit_price/case_price
     _seed_products()     # upsert 5,083 products from seed JSON
+    # Start optional Redis listener for multi-worker cart sync
+    asyncio.create_task(ws_cart_router.redis_listener())
     yield
 
 
@@ -180,6 +185,9 @@ for router_module in [
     ai_parse, share_links, settings, inventory, scraper, analytics,
 ]:
     app.include_router(router_module.router)
+
+app.include_router(cart_router.router)
+app.include_router(ws_cart_router.router)
 
 
 @app.get("/health")
