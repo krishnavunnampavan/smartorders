@@ -8,6 +8,7 @@ import SettingsPage from './pages/SettingsPage'
 import PublicOrderPage from './pages/PublicOrderPage'
 import InventoryPage from './pages/InventoryPage'
 import ProductsPage from './pages/ProductsPage'
+import FloatingOrderCart from './components/shared/FloatingOrderCart'
 
 export default function App() {
   return (
@@ -26,6 +27,9 @@ export default function App() {
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>
+
+      {/* Global floating order cart — visible on all app pages */}
+      <FloatingOrderCart />
     </BrowserRouter>
   )
 }
