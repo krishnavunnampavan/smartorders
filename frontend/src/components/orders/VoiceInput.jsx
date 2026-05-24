@@ -3,10 +3,8 @@ import { Mic, MicOff, Loader, Plus, X, AlertTriangle, CheckCircle, Search, Rotat
 import toast from 'react-hot-toast'
 import { useVoiceRecorder } from '../../hooks/useVoiceRecorder'
 import client from '../../api/client'
-import { useOrderStore, calcUnitPrice, STANDARD_SIZES, DEFAULT_UNIT_OPTIONS } from '../../store/orderStore'
+import { useOrderStore, calcUnitPrice, STANDARD_SIZES, getUnitOptions, defaultUnitLabel, parseCasePack } from '../../store/orderStore'
 import { useDebounce } from '../../hooks/useDebounce'
-
-const UNIT_LABELS = DEFAULT_UNIT_OPTIONS.map((u) => u.unit_label)
 
 // ── Inline search for unmatched items ────────────────────────────────────
 function UnmatchedItem({ item, onPromote, onDismiss }) {
@@ -42,10 +40,10 @@ function UnmatchedItem({ item, onPromote, onDismiss }) {
       source: 'voice',
       pack: product.pack,
       size_options: product.size_options || STANDARD_SIZES.map((s) => ({ size_label: s, unit_price: null, is_default: s === '750ml' })),
-      unit_options: product.unit_options || DEFAULT_UNIT_OPTIONS,
+      unit_options: product.unit_options || getUnitOptions(product.category, parseCasePack(product.pack)),
       selected_size: '750ml',
-      selected_unit: '12 Pack',
-      bottles_per_unit: 12,
+      selected_unit: defaultUnitLabel(product.category),
+      bottles_per_unit: parseCasePack(product.pack),
     })
     setShowResults(false)
   }
@@ -122,10 +120,12 @@ function MatchedItemCard({ item, onRemove, onUpdate }) {
     ? item.size_options
     : STANDARD_SIZES.map((s) => ({ size_label: s, unit_price: null, is_default: s === '750ml' }))
 
-  const unitOpts = item.unit_options?.length ? item.unit_options : DEFAULT_UNIT_OPTIONS
+  const unitOpts = item.unit_options?.length
+    ? item.unit_options
+    : getUnitOptions(item.category, parseCasePack(item.pack))
 
   const selSize = item.selected_size || '750ml'
-  const selUnit = item.selected_unit || '12 Pack'
+  const selUnit = item.selected_unit || defaultUnitLabel(item.category)
 
   const currentSizeOpt = sizeOpts.find((s) => s.size_label === selSize) || sizeOpts[0]
   const currentUnitOpt = unitOpts.find((u) => u.unit_label === selUnit) || unitOpts[0]
@@ -279,7 +279,7 @@ export default function VoiceInput() {
       const sizeOpt = (item.size_options || []).find((s) => s.size_label === item.selected_size)
         || { size_label: item.selected_size || '750ml' }
       const unitOpt = (item.unit_options || []).find((u) => u.unit_label === item.selected_unit)
-        || { unit_label: item.selected_unit || 'Case', bottles_per_unit: item.bottles_per_unit || 12 }
+        || { unit_label: item.selected_unit || defaultUnitLabel(item.category), bottles_per_unit: item.bottles_per_unit || 12 }
       addItem(item, sizeOpt, unitOpt, item.quantity)
     })
     setAccumulated([])

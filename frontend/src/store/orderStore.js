@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import cartAPI from '../api/cart'
 
-// ── Price helpers ─────────────────────────────────────────────────────────────
+// ── Size helpers ──────────────────────────────────────────────────────────────
 
 const SIZE_MULTIPLIERS = {
   '50ml':  0.10, '100ml': 0.18, '200ml': 0.30,
@@ -11,7 +11,10 @@ const SIZE_MULTIPLIERS = {
 
 export const STANDARD_SIZES = ['50ml', '100ml', '200ml', '375ml', '500ml', '750ml', '1L', '1.5L', '1.75L']
 
-export const DEFAULT_UNIT_OPTIONS = [
+// ── Unit helpers ──────────────────────────────────────────────────────────────
+
+/** Beer & RTD get pack counts; spirits/wine get case-based options. */
+export const BEER_PACK_OPTIONS = [
   { unit_label: 'Single',  bottles_per_unit: 1  },
   { unit_label: '3 Pack',  bottles_per_unit: 3  },
   { unit_label: '4 Pack',  bottles_per_unit: 4  },
@@ -21,7 +24,47 @@ export const DEFAULT_UNIT_OPTIONS = [
   { unit_label: '30 Pack', bottles_per_unit: 30 },
 ]
 
-const PACK_MAP = { 'Single': 1, '3 Pack': 3, '4 Pack': 4, '6 Pack': 6, '12 Pack': 12, '24 Pack': 24, '30 Pack': 30 }
+export const CASE_UNIT_OPTIONS = [
+  { unit_label: 'Bottle',     bottles_per_unit: 1  },
+  { unit_label: 'Half Case',  bottles_per_unit: 6  },
+  { unit_label: 'Case',       bottles_per_unit: 12 },
+  { unit_label: 'Mixed Case', bottles_per_unit: 12 },
+]
+
+const BEER_PACK_MAP = Object.fromEntries(BEER_PACK_OPTIONS.map((o) => [o.unit_label, o.bottles_per_unit]))
+
+export function isBeerOrRtd(category = '') {
+  const cat = (category || '').toLowerCase()
+  return cat.includes('beer') || cat.includes('rtd')
+}
+
+/**
+ * Returns the right unit options for a product category.
+ * casePack is used for the "Half Case" / "Case" labels on non-beer products.
+ */
+export function getUnitOptions(category = '', casePack = 12) {
+  if (isBeerOrRtd(category)) return BEER_PACK_OPTIONS
+  const half = Math.max(1, Math.floor(casePack / 2))
+  return [
+    { unit_label: 'Bottle',     bottles_per_unit: 1        },
+    { unit_label: 'Half Case',  bottles_per_unit: half     },
+    { unit_label: 'Case',       bottles_per_unit: casePack },
+    { unit_label: 'Mixed Case', bottles_per_unit: casePack },
+  ]
+}
+
+/** Default selected unit label for a category. */
+export function defaultUnitLabel(category = '') {
+  return isBeerOrRtd(category) ? '12 Pack' : 'Case'
+}
+
+export function parseCasePack(packStr) {
+  if (!packStr) return 12
+  // Handles: "12", "12/750ml", "6-Pack", "12-pack"
+  const token = String(packStr).split('/')[0].split('-')[0].trim()
+  const n = parseInt(token, 10)
+  return isNaN(n) || n < 1 ? 12 : n
+}
 
 export function calcUnitPrice(baseUnitPrice, sizeLabel, unit, casePackSize = 12) {
   if (!baseUnitPrice) return null
@@ -29,25 +72,19 @@ export function calcUnitPrice(baseUnitPrice, sizeLabel, unit, casePackSize = 12)
   const sizePrice = baseUnitPrice * mult
   const half = Math.max(1, Math.floor(casePackSize / 2))
   const bottlesMap = {
-    ...PACK_MAP,
-    // legacy compat
+    ...BEER_PACK_MAP,
     'Bottle': 1, 'Half Case': half, 'Case': casePackSize, 'Mixed Case': casePackSize,
   }
   const bpu = bottlesMap[unit] ?? 1
   return { unitPrice: +(sizePrice * bpu).toFixed(2), bottlesPerUnit: bpu }
 }
 
-function parseCasePack(packStr) {
-  if (!packStr) return 12
-  const n = parseInt(String(packStr).split('/')[0], 10)
-  return isNaN(n) ? 12 : n
-}
+// ── Normalization ─────────────────────────────────────────────────────────────
 
 function makeKey(item) {
   return `${item.product_id}__${item.selected_size}__${item.selected_unit}`
 }
 
-// Normalize a server cart item: add _key and convenience aliases
 function normalize(item) {
   return { ...item, _key: makeKey(item) }
 }
@@ -56,15 +93,14 @@ function normalize(item) {
 
 export const useOrderStore = create((set, get) => ({
   currentOrder: null,
-  items: [],           // normalized server cart items (each has .id and ._key)
-  wsStatus: 'disconnected',   // 'connecting' | 'connected' | 'disconnected'
+  items: [],
+  wsStatus: 'disconnected',
   connectionCount: 0,
 
   setCurrentOrder: (order) => set({ currentOrder: order }),
   setWsStatus: (status) => set({ wsStatus: status }),
   setConnectionCount: (count) => set({ connectionCount: count }),
 
-  // ── Load from server on startup ───────────────────────────────────────────
   loadCart: async () => {
     try {
       const cart = await cartAPI.getCart()
@@ -94,7 +130,7 @@ export const useOrderStore = create((set, get) => ({
 
   clearItemsFromServer: () => set({ items: [] }),
 
-  // ── Mutations (go through API; server pushes update via WebSocket) ─────────
+  // ── Mutations ─────────────────────────────────────────────────────────────
 
   addItem: async (product, sizeOption, unitOption, quantity = 1) => {
     const casePack = parseCasePack(product.pack)
@@ -117,24 +153,16 @@ export const useOrderStore = create((set, get) => ({
         source:           product.source || 'manual',
         added_by:         'manager',
       })
-      // Server will push ITEM_ADDED / ITEM_UPDATED back via WebSocket
     } catch (_) {}
   },
 
-  // Update by DB id
   updateItem: async (itemId, updates) => {
-    try {
-      await cartAPI.updateItem(itemId, updates)
-    } catch (_) {}
+    try { await cartAPI.updateItem(itemId, updates) } catch (_) {}
   },
 
-  // Remove by DB id
   removeItem: async (itemId) => {
-    // Optimistic removal
     set((s) => ({ items: s.items.filter((i) => i.id !== itemId) }))
-    try {
-      await cartAPI.removeItem(itemId)
-    } catch (_) {}
+    try { await cartAPI.removeItem(itemId) } catch (_) {}
   },
 
   clearCart: async () => {
@@ -150,15 +178,14 @@ export const useOrderStore = create((set, get) => ({
     } catch (_) { return null }
   },
 
-  // ── _key-based helpers (used by FloatingOrderCart inline selectors) ────────
+  // ── _key-based selectors (FloatingOrderCart inline edits) ─────────────────
 
   updateItemSize: async (key, sizeLabel) => {
     const item = get().items.find((i) => i._key === key)
     if (!item) return
-    const calc = calcUnitPrice(
-      item.unit_price, sizeLabel, item.selected_unit,
-      parseCasePack(item.case_pack)
-    ) || { unitPrice: item.effective_price, bottlesPerUnit: item.bottles_per_unit }
+    const casePack = parseCasePack(item.case_pack)
+    const calc = calcUnitPrice(item.unit_price, sizeLabel, item.selected_unit, casePack)
+      || { unitPrice: item.effective_price, bottlesPerUnit: item.bottles_per_unit }
     try {
       await cartAPI.updateItem(item.id, {
         selected_size:    sizeLabel,
@@ -171,10 +198,9 @@ export const useOrderStore = create((set, get) => ({
   updateItemUnit: async (key, unitLabel) => {
     const item = get().items.find((i) => i._key === key)
     if (!item) return
-    const calc = calcUnitPrice(
-      item.unit_price, item.selected_size, unitLabel,
-      parseCasePack(item.case_pack)
-    ) || { unitPrice: item.effective_price, bottlesPerUnit: item.bottles_per_unit }
+    const casePack = parseCasePack(item.case_pack)
+    const calc = calcUnitPrice(item.unit_price, item.selected_size, unitLabel, casePack)
+      || { unitPrice: item.effective_price, bottlesPerUnit: item.bottles_per_unit }
     try {
       await cartAPI.updateItem(item.id, {
         selected_unit:    unitLabel,
@@ -187,30 +213,26 @@ export const useOrderStore = create((set, get) => ({
   updateItemQty: async (key, quantity) => {
     const item = get().items.find((i) => i._key === key)
     if (!item) return
-    // Optimistic
     set((s) => ({
-      items: s.items.map((i) => i._key === key ? { ...i, quantity, total_bottles: quantity * (i.bottles_per_unit || 1) } : i),
+      items: s.items.map((i) =>
+        i._key === key ? { ...i, quantity, total_bottles: quantity * (i.bottles_per_unit || 1) } : i
+      ),
     }))
-    try {
-      await cartAPI.updateItem(item.id, { quantity })
-    } catch (_) {}
+    try { await cartAPI.updateItem(item.id, { quantity }) } catch (_) {}
   },
 
-  // ── Legacy compat wrappers ────────────────────────────────────────────────
+  // ── Legacy compat ─────────────────────────────────────────────────────────
 
   addResolvedItem: (item) => {
     const s = get()
     const sizeOpt = { size_label: item.selected_size || '750ml' }
-    const unitOpt = { unit_label: item.selected_unit || 'Case', bottles_per_unit: item.bottles_per_unit || 1 }
+    const unitOpt = { unit_label: item.selected_unit || defaultUnitLabel(item.category), bottles_per_unit: item.bottles_per_unit || 1 }
     const exists = s.items.find((i) => i.product_id === (item.product_id || item.id))
     if (exists) {
       get().updateItemQty(exists._key, exists.quantity + (item.quantity || 1))
       return
     }
-    get().addItem(
-      { ...item, product_id: item.product_id || item.id },
-      sizeOpt, unitOpt, item.quantity || 1
-    )
+    get().addItem({ ...item, product_id: item.product_id || item.id }, sizeOpt, unitOpt, item.quantity || 1)
   },
 
   removeResolvedItem: async (product_id) => {

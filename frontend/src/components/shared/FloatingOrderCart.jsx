@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { useOrderStore, STANDARD_SIZES, DEFAULT_UNIT_OPTIONS } from '../../store/orderStore'
+import { useOrderStore, STANDARD_SIZES, getUnitOptions, parseCasePack } from '../../store/orderStore'
 import PriceTagBadge from './PriceTagBadge'
 import { formatCurrency } from '../../utils/formatters'
 
@@ -55,7 +55,7 @@ function CartItem({ item }) {
 
   const unitLabels = item.unit_options?.length
     ? item.unit_options.map((u) => u.unit_label)
-    : DEFAULT_UNIT_OPTIONS.map((u) => u.unit_label)
+    : getUnitOptions(item.category, parseCasePack(item.case_pack)).map((u) => u.unit_label)
 
   // Server provides line_total; fall back to local calculation
   const lineTotal = item.line_total != null

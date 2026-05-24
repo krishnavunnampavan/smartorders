@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Search, X, ChevronDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import client from '../../api/client'
-import { useOrderStore, calcUnitPrice, STANDARD_SIZES, DEFAULT_UNIT_OPTIONS } from '../../store/orderStore'
+import { useOrderStore, calcUnitPrice, STANDARD_SIZES, getUnitOptions, defaultUnitLabel, parseCasePack } from '../../store/orderStore'
 import { useDebounce } from '../../hooks/useDebounce'
 import PriceTagBadge from '../shared/PriceTagBadge'
 
@@ -54,20 +54,14 @@ export default function ManualEntry() {
     keepPreviousData: true,
   })
 
-  const getLocal = (pid) => {
+  const getLocal = (pid, category = '') => {
     const s = localState[pid]
     return {
-      qty: s?.qty ?? 1,
+      qty:  s?.qty  ?? 1,
       size: s?.size ?? '750ml',
-      unit: s?.unit ?? '12 Pack',
-      unitOpt: s?.unitOpt ?? DEFAULT_UNIT_OPTIONS.find((u) => u.unit_label === '12 Pack'),
+      unit: s?.unit ?? defaultUnitLabel(category),
+      unitOpt: s?.unitOpt,
     }
-  }
-
-  function parseCasePack(packStr) {
-    if (!packStr) return 12
-    const n = parseInt(String(packStr).split('/')[0], 10)
-    return isNaN(n) ? 12 : n
   }
 
   const setLocal = (pid, field, value) =>
@@ -81,7 +75,8 @@ export default function ManualEntry() {
     return STANDARD_SIZES
   }
 
-  const getUnitOptions = (p) => p.unit_options?.length ? p.unit_options : DEFAULT_UNIT_OPTIONS
+  const getProductUnitOptions = (p) =>
+    p.unit_options?.length ? p.unit_options : getUnitOptions(p.category, parseCasePack(p.pack))
 
   const getEffectivePrice = (p, sizeLabel, unitLabel) => {
     const casePack = parseCasePack(p.pack)
@@ -90,20 +85,20 @@ export default function ManualEntry() {
   }
 
   const addToOrder = (p) => {
-    const { qty, size, unit } = getLocal(p.id)
-    const unitOpts = getUnitOptions(p)
+    const { qty, size, unit } = getLocal(p.id, p.category)
+    const unitOpts = getProductUnitOptions(p)
     const sizeOpts = getSizeOptions(p).map((sl) => {
       const found = (p.size_options || []).find((s) => (s.size_label ?? s) === sl)
       return found || { size_label: sl }
     })
     const sizeOpt = sizeOpts.find((s) => (s.size_label ?? s) === size) || { size_label: size }
-    const unitOpt = unitOpts.find((u) => u.unit_label === unit) || { unit_label: unit, bottles_per_unit: 12 }
+    const unitOpt = unitOpts.find((u) => u.unit_label === unit) || { unit_label: unit, bottles_per_unit: parseCasePack(p.pack) }
 
     addItem(
       { ...p, product_id: p.id, product_name: p.name, source: 'manual' },
       sizeOpt, unitOpt, qty
     )
-    setLocalState((prev) => ({ ...prev, [p.id]: { qty: 1, size: '750ml', unit: '12 Pack' } }))
+    setLocalState((prev) => ({ ...prev, [p.id]: { qty: 1, size: '750ml', unit: defaultUnitLabel(p.category) } }))
     toast.success(`Added ${p.name}`, { duration: 1200 })
   }
 
@@ -170,9 +165,9 @@ export default function ManualEntry() {
 
         {products?.map((p) => {
           const ordered = inOrder(p.id)
-          const { qty, size, unit } = getLocal(p.id)
+          const { qty, size, unit } = getLocal(p.id, p.category)
           const sizeOptions = getSizeOptions(p)
-          const unitOptions = getUnitOptions(p)
+          const unitOptions = getProductUnitOptions(p)
           const effectivePrice = getEffectivePrice(p, size, unit)
           const casePack = parseCasePack(p.pack)
           const bpu = unitOptions.find((u) => u.unit_label === unit)?.bottles_per_unit ?? casePack

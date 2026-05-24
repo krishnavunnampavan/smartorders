@@ -22,11 +22,29 @@ WINE_KEYWORDS = ("wine", "chardonnay", "cabernet", "merlot", "pinot", "sauvignon
                  "riesling", "prosecco", "champagne", "brut", "rosé", "shiraz",
                  "malbec", "zinfandel", "moscato")
 
+# Pack options for Beer & RTD products
+BEER_PACK_OPTIONS = [
+    {"unit_label": "Single",   "bottles_per_unit": 1,  "is_default": False},
+    {"unit_label": "3 Pack",   "bottles_per_unit": 3,  "is_default": False},
+    {"unit_label": "4 Pack",   "bottles_per_unit": 4,  "is_default": False},
+    {"unit_label": "6 Pack",   "bottles_per_unit": 6,  "is_default": False},
+    {"unit_label": "12 Pack",  "bottles_per_unit": 12, "is_default": True},
+    {"unit_label": "24 Pack",  "bottles_per_unit": 24, "is_default": False},
+    {"unit_label": "30 Pack",  "bottles_per_unit": 30, "is_default": False},
+]
+
+_BEER_PACK_MAP = {p["unit_label"]: p["bottles_per_unit"] for p in BEER_PACK_OPTIONS}
+
 
 def _is_wine(product) -> bool:
     name = (product.name or "").lower()
     cat  = (product.category or "").lower()
     return "wine" in cat or any(k in name for k in WINE_KEYWORDS)
+
+
+def _is_beer_or_rtd(product) -> bool:
+    cat = (product.category or "").lower()
+    return "beer" in cat or "rtd" in cat
 
 
 def _base_price(product) -> Optional[Decimal]:
@@ -35,11 +53,23 @@ def _base_price(product) -> Optional[Decimal]:
     return Decimal(str(p)) if p else None
 
 
+def _parse_case_pack(product) -> int:
+    """Parse the case pack size from product.pack field."""
+    try:
+        pack_str = str(product.pack or "").strip()
+        # Handles: "12", "12/750ml", "6/1.75L", "12-Pack", "6-pack"
+        token = pack_str.split("/")[0].split("-")[0].strip()
+        n = int(token)
+        return max(1, n)
+    except (ValueError, AttributeError):
+        return 12
+
+
 def get_size_options(product) -> list[dict]:
     """
     Returns list of {size_label, size_ml, unit_price, is_default}.
-    Wine: only the catalog 750ml size (no multiplier expansion).
-    Non-wine: all 8 standard sizes derived from 750ml price.
+    Wine: only the catalog 750ml size.
+    Non-wine: all 9 standard sizes derived from 750ml price.
     """
     base = _base_price(product)
     if base is None or base == 0:
@@ -60,22 +90,22 @@ def get_size_options(product) -> list[dict]:
     return options
 
 
-PACK_OPTIONS = [
-    {"unit_label": "Single",   "bottles_per_unit": 1,  "is_default": False},
-    {"unit_label": "3 Pack",   "bottles_per_unit": 3,  "is_default": False},
-    {"unit_label": "4 Pack",   "bottles_per_unit": 4,  "is_default": False},
-    {"unit_label": "6 Pack",   "bottles_per_unit": 6,  "is_default": False},
-    {"unit_label": "12 Pack",  "bottles_per_unit": 12, "is_default": True},
-    {"unit_label": "24 Pack",  "bottles_per_unit": 24, "is_default": False},
-    {"unit_label": "30 Pack",  "bottles_per_unit": 30, "is_default": False},
-]
-
-_PACK_MAP = {p["unit_label"]: p["bottles_per_unit"] for p in PACK_OPTIONS}
-
-
 def get_unit_options(product, selected_size_ml: int = 750) -> list[dict]:
-    """Returns the standard pack options list."""
-    return list(PACK_OPTIONS)  # return a copy
+    """
+    Beer & RTD → pack options (Single / 3-Pack … 30-Pack).
+    Everything else → Bottle / Half Case / Case / Mixed Case based on product.pack.
+    """
+    if _is_beer_or_rtd(product):
+        return list(BEER_PACK_OPTIONS)
+
+    case_pack = _parse_case_pack(product)
+    half = max(1, case_pack // 2)
+    return [
+        {"unit_label": "Bottle",     "bottles_per_unit": 1,         "is_default": False},
+        {"unit_label": "Half Case",  "bottles_per_unit": half,       "is_default": False},
+        {"unit_label": "Case",       "bottles_per_unit": case_pack,  "is_default": True},
+        {"unit_label": "Mixed Case", "bottles_per_unit": case_pack,  "is_default": False},
+    ]
 
 
 def calculate_effective_price(
@@ -89,36 +119,37 @@ def calculate_effective_price(
     Returns {unit_price, bottles_per_unit, total_bottles, line_total}.
     unit_price = price for the selected size × bottles_per_unit.
     """
-    # Determine bottles_per_unit from label (new pack labels + legacy compat)
+    # Resolve bottles_per_unit — handles both beer pack labels and legacy case labels
     half = max(1, case_pack // 2)
     unit_map = {
-        **_PACK_MAP,
-        # Legacy labels kept for backward compat
+        **_BEER_PACK_MAP,
+        # Case-based labels
         "Bottle":     1,
         "Half Case":  half,
         "Case":       case_pack,
         "Mixed Case": case_pack,
     }
-    bpu_early = unit_map.get(unit_label, 1)
+    bottles_per_unit = unit_map.get(unit_label, 1)
 
     if base_unit_price is None:
-        return {"unit_price": None, "bottles_per_unit": bpu_early, "total_bottles": quantity * bpu_early, "line_total": None}
+        return {
+            "unit_price": None,
+            "bottles_per_unit": bottles_per_unit,
+            "total_bottles": quantity * bottles_per_unit,
+            "line_total": None,
+        }
 
     base = Decimal(str(base_unit_price))
-
-    # size multiplier
     _, mult = _SIZE_BY_LABEL.get(size_label, (750, Decimal("1.00")))
     size_price = (base * mult).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-    bottles_per_unit = bpu_early
-
-    unit_price   = size_price * bottles_per_unit
+    unit_price    = size_price * bottles_per_unit
     total_bottles = bottles_per_unit * quantity
-    line_total   = unit_price * quantity
+    line_total    = unit_price * quantity
 
     return {
-        "unit_price":      float(unit_price.quantize(Decimal("0.01"))),
+        "unit_price":       float(unit_price.quantize(Decimal("0.01"))),
         "bottles_per_unit": bottles_per_unit,
-        "total_bottles":   total_bottles,
-        "line_total":      float(line_total.quantize(Decimal("0.01"))),
+        "total_bottles":    total_bottles,
+        "line_total":       float(line_total.quantize(Decimal("0.01"))),
     }

@@ -3,7 +3,7 @@ import { useDropzone } from 'react-dropzone'
 import { Camera, Trash2, ChevronDown, CheckCircle, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import client from '../../api/client'
-import { useOrderStore, STANDARD_SIZES, DEFAULT_UNIT_OPTIONS } from '../../store/orderStore'
+import { useOrderStore, STANDARD_SIZES, getUnitOptions, defaultUnitLabel, parseCasePack } from '../../store/orderStore'
 import LoadingSpinner from '../shared/LoadingSpinner'
 import PriceTagBadge from '../shared/PriceTagBadge'
 
@@ -23,8 +23,8 @@ function SizeSelect({ value, options, onChange }) {
   )
 }
 
-function UnitSelect({ value, options, onChange }) {
-  const opts = options?.length ? options : DEFAULT_UNIT_OPTIONS
+function UnitSelect({ value, options, onChange, category, casePack }) {
+  const opts = options?.length ? options : getUnitOptions(category, casePack)
   return (
     <div className="relative">
       <select
@@ -69,7 +69,7 @@ export default function PhotoInput() {
       const resolved = (data.resolved || []).map((r) => ({
         ...r,
         selected_size: r.selected_size || '750ml',
-        selected_unit: r.selected_unit || '12 Pack',
+        selected_unit: r.selected_unit || defaultUnitLabel(r.category),
         bottles_per_unit: r.bottles_per_unit || 12,
       }))
       setRows(resolved)
@@ -110,7 +110,7 @@ export default function PhotoInput() {
       const sizeOpt = (item.size_options || []).find((s) => s.size_label === item.selected_size)
         || { size_label: item.selected_size || '750ml' }
       const unitOpt = (item.unit_options || []).find((u) => u.unit_label === item.selected_unit)
-        || { unit_label: item.selected_unit || 'Case', bottles_per_unit: item.bottles_per_unit || 12 }
+        || { unit_label: item.selected_unit || defaultUnitLabel(item.category), bottles_per_unit: item.bottles_per_unit || 12 }
       addItem(item, sizeOpt, unitOpt, item.quantity)
     })
     toast.success(`${rows.length} items added to cart`)
@@ -209,6 +209,8 @@ export default function PhotoInput() {
                       <UnitSelect
                         value={item.selected_unit}
                         options={item.unit_options}
+                        category={item.category}
+                        casePack={parseCasePack(item.pack)}
                         onChange={(v) => updateRow(idx, 'selected_unit', v)}
                       />
                     </div>
