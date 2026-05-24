@@ -22,13 +22,17 @@ class AIService:
             return "claude"
         raise ValueError("No AI API key configured. Go to Settings to add one.")
 
-    async def transcribe_audio(self, audio_bytes: bytes) -> str:
+    async def transcribe_audio(self, audio_bytes: bytes, mime_type: str = "audio/webm") -> str:
         if not self.openai_key:
             raise ValueError("Voice input requires an OpenAI API key.")
-        client = OpenAI(api_key=self.openai_key)
-        transcript = client.audio.transcriptions.create(
+        ext_map = {"audio/mp4": "mp4", "audio/ogg": "ogg", "audio/mpeg": "mp3"}
+        ext = ext_map.get(mime_type.split(";")[0], "webm")
+        from openai import AsyncOpenAI
+        async_client = AsyncOpenAI(api_key=self.openai_key)
+        transcript = await async_client.audio.transcriptions.create(
             model="whisper-1",
-            file=("audio.webm", audio_bytes, "audio/webm"),
+            file=(f"audio.{ext}", audio_bytes, mime_type),
+            language="en",
         )
         return transcript.text
 
@@ -36,11 +40,14 @@ class AIService:
         hints_block = f"\n{context_hints}\n" if context_hints else ""
         prompt = f"""
 Extract all product names and quantities from this liquor store order text.
-Return ONLY a JSON array, no explanation, no markdown.
-Format: [{{"name": "product name", "qty": number, "unit": "cases or bottles"}}]
+Return a JSON object with an "items" array.
+Format: {{"items": [{{"name": "product name", "qty": number, "unit": "cases or bottles"}}]}}
 
-If unit is not specified, assume cases.
-Normalize product names (capitalize brand names).
+Rules:
+- If unit not specified, assume cases.
+- Normalize product names (capitalize brand names, e.g. "titos" → "Tito's Vodka").
+- Numbers spoken as words should be converted (e.g. "three" → 3).
+- If no items found, return {{"items": []}}.
 {hints_block}
 Text: {raw_text}
 """
@@ -112,19 +119,23 @@ Catalog text:
         return False
 
     async def _openai_parse(self, prompt: str) -> list[dict]:
-        client = OpenAI(api_key=self.openai_key)
-        response = client.chat.completions.create(
+        from openai import AsyncOpenAI
+        async_client = AsyncOpenAI(api_key=self.openai_key)
+        response = await async_client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
+            response_format={"type": "json_object"},
         )
         text = response.choices[0].message.content.strip()
-        # Strip possible markdown code fences
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        return json.loads(text)
+        data = json.loads(text)
+        # Accept {"items": [...]} or bare array
+        if isinstance(data, list):
+            return data
+        for key in ("items", "products", "order", "result"):
+            if isinstance(data.get(key), list):
+                return data[key]
+        return []
 
     async def _claude_parse(self, prompt: str) -> list[dict]:
         client = anthropic.Anthropic(api_key=self.claude_key)

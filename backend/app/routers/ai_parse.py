@@ -25,11 +25,18 @@ class FeedbackIn(BaseModel):
 
 
 @router.post("/voice")
-async def voice_to_order(audio: UploadFile = File(...), db: Session = Depends(get_db)):
+async def voice_to_order(
+    audio: UploadFile = File(...),
+    mime_type: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
     content = await audio.read()
+    if not content:
+        raise HTTPException(400, "Empty audio file")
+    effective_mime = mime_type or audio.content_type or "audio/webm"
     ai = AIService()
     try:
-        transcript = await ai.transcribe_audio(content)
+        transcript = await ai.transcribe_audio(content, effective_mime)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
