@@ -69,10 +69,13 @@ export default function FloatingOrderCart() {
           })
         )
       )
+      // Auto-split by company, then open combined PDF
+      await client.post(`/orders/${order.id}/split`)
+      window.open(`/api/orders/${order.id}/combined-pdf`, '_blank')
       clearResolvedItems()
       setOpen(false)
       navigate(`/orders?review=${order.id}`)
-      toast.success('Order created!')
+      toast.success('Order created! PDF opened in new tab.')
     } catch {
       toast.error('Failed to create order')
     } finally {
