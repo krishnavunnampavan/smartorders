@@ -15,6 +15,8 @@ const STATUS_COLOR = {
 
 export default function SmartOrderModal({ onClose }) {
   const [adding, setAdding] = useState(false)
+  // Local quantity overrides: {product_id: qty}
+  const [qtyOverrides, setQtyOverrides] = useState({})
   const { addResolvedItem } = useOrderStore()
   const month = thisMonth()
 
@@ -26,7 +28,18 @@ export default function SmartOrderModal({ onClose }) {
   const items = data?.items || []
   const dealItems = items.filter((i) => i.price_status === 'DEAL' || i.price_status === 'RECOVERY_DEAL')
   const stableItems = items.filter((i) => i.price_status === 'STABLE')
-  const estTotal = items.reduce((s, i) => s + i.unit_price * i.quantity, 0)
+
+  const getQty = (item) => qtyOverrides[item.product_id] ?? item.quantity
+
+  const changeQty = (productId, delta) => {
+    setQtyOverrides((prev) => {
+      const base = items.find((i) => i.product_id === productId)?.quantity ?? 1
+      const current = prev[productId] ?? base
+      return { ...prev, [productId]: Math.max(1, current + delta) }
+    })
+  }
+
+  const estTotal = items.reduce((s, i) => s + i.unit_price * getQty(i), 0)
 
   const handleAddAll = async () => {
     if (!items.length) return
@@ -36,7 +49,7 @@ export default function SmartOrderModal({ onClose }) {
         product_id: item.product_id,
         product_name: item.product_name,
         company_id: item.company_id,
-        quantity: item.quantity,
+        quantity: getQty(item),
         unit_price: item.unit_price,
         price_status: item.price_status,
         source: item.source,
@@ -90,10 +103,10 @@ export default function SmartOrderModal({ onClose }) {
           {!isLoading && items.length > 0 && (
             <>
               {/* Summary strip */}
-              <div className="grid grid-cols-3 gap-3 mb-5">
+              <div className="grid grid-cols-3 gap-3 mb-4">
                 <div className="bg-[#0d1117] rounded-xl p-3 text-center">
                   <p className="text-xl font-bold text-[#e6edf3]">{items.length}</p>
-                  <p className="text-[#8b949e] text-xs mt-0.5">Total items</p>
+                  <p className="text-[#8b949e] text-xs mt-0.5">Items</p>
                 </div>
                 <div className="bg-[#0d1117] rounded-xl p-3 text-center">
                   <p className="text-xl font-bold text-green-400">{dealItems.length}</p>
@@ -105,7 +118,11 @@ export default function SmartOrderModal({ onClose }) {
                 </div>
               </div>
 
-              {/* Deal items first */}
+              <p className="text-[#8b949e] text-xs mb-3 text-center">
+                Use +/− to adjust quantities before adding to cart
+              </p>
+
+              {/* Deal items */}
               {dealItems.length > 0 && (
                 <div className="mb-4">
                   <div className="flex items-center gap-1.5 mb-2">
@@ -114,7 +131,7 @@ export default function SmartOrderModal({ onClose }) {
                   </div>
                   <div className="space-y-1.5">
                     {dealItems.map((item) => (
-                      <ItemRow key={item.product_id} item={item} />
+                      <ItemRow key={item.product_id} item={item} qty={getQty(item)} onChangeQty={changeQty} />
                     ))}
                   </div>
                 </div>
@@ -126,7 +143,7 @@ export default function SmartOrderModal({ onClose }) {
                   <p className="text-xs font-semibold text-[#8b949e] uppercase tracking-wide mb-2">Stable — normal qty</p>
                   <div className="space-y-1.5">
                     {stableItems.map((item) => (
-                      <ItemRow key={item.product_id} item={item} />
+                      <ItemRow key={item.product_id} item={item} qty={getQty(item)} onChangeQty={changeQty} />
                     ))}
                   </div>
                 </div>
@@ -143,16 +160,12 @@ export default function SmartOrderModal({ onClose }) {
               disabled={adding}
               className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm bg-[#58a6ff] hover:bg-[#79b8ff] text-[#0d1117] transition-colors disabled:opacity-60"
             >
-              {adding ? (
-                <Loader size={16} className="animate-spin" />
-              ) : (
-                <ShoppingCart size={16} />
-              )}
+              {adding ? <Loader size={16} className="animate-spin" /> : <ShoppingCart size={16} />}
               {adding ? 'Adding…' : `Add All ${items.length} Items to Cart`}
               {!adding && <ChevronRight size={15} />}
             </button>
             <p className="text-center text-[#8b949e] text-xs mt-2">
-              HOLD items are excluded. Review in cart before finalising.
+              HOLD items are excluded. Review quantities above before adding.
             </p>
           </div>
         )}
@@ -161,14 +174,23 @@ export default function SmartOrderModal({ onClose }) {
   )
 }
 
-function ItemRow({ item }) {
+function ItemRow({ item, qty, onChangeQty }) {
   return (
-    <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[rgba(22,27,34,0.6)] border border-[rgba(48,54,61,0.4)]">
+    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[rgba(22,27,34,0.6)] border border-[rgba(48,54,61,0.4)]">
       <span className="text-[#e6edf3] text-sm truncate flex-1">{item.product_name}</span>
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-center gap-1.5 shrink-0">
         <PriceTagBadge status={item.price_status} />
-        <span className="text-[#8b949e] text-xs font-mono">{formatCurrency(item.unit_price)}</span>
-        <span className="text-[#58a6ff] text-xs font-bold w-10 text-right">×{item.quantity}</span>
+        <span className="text-[#8b949e] text-xs font-mono hidden sm:block">{formatCurrency(item.unit_price)}</span>
+        {/* Qty controls */}
+        <button
+          onClick={() => onChangeQty(item.product_id, -1)}
+          className="w-6 h-6 rounded-md bg-[rgba(48,54,61,0.8)] text-[#e6edf3] flex items-center justify-center hover:bg-[rgba(48,54,61,1)] text-sm transition-colors"
+        >−</button>
+        <span className="text-[#58a6ff] text-xs font-bold w-6 text-center font-mono">{qty}</span>
+        <button
+          onClick={() => onChangeQty(item.product_id, 1)}
+          className="w-6 h-6 rounded-md bg-[rgba(48,54,61,0.8)] text-[#e6edf3] flex items-center justify-center hover:bg-[rgba(48,54,61,1)] text-sm transition-colors"
+        >+</button>
       </div>
     </div>
   )

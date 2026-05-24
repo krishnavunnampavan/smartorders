@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { Link2, Download, CheckCircle, Clock, RotateCcw, AlertTriangle } from 'lucide-react'
+import { Link2, Download, CheckCircle, Clock, RotateCcw, AlertTriangle, StickyNote, Pencil, X, Save } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Layout from '../components/layout/Layout'
 import PriceTagBadge from '../components/shared/PriceTagBadge'
@@ -10,7 +10,74 @@ import client from '../api/client'
 import { formatCurrency } from '../utils/formatters'
 import { useOrderStore } from '../store/orderStore'
 
-function SplitCard({ split, orderId }) {
+// ── Order Notes editor ─────────────────────────────────────────────────────
+function OrderNotes({ orderId, initialNotes }) {
+  const qc = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(initialNotes || '')
+
+  const saveMutation = useMutation({
+    mutationFn: (notes) => client.put(`/orders/${orderId}`, { notes }),
+    onSuccess: () => {
+      qc.invalidateQueries(['order', orderId])
+      qc.invalidateQueries(['orders'])
+      setEditing(false)
+      toast.success('Notes saved')
+    },
+  })
+
+  if (!editing) {
+    return (
+      <div
+        className="flex items-start gap-2 p-3 rounded-lg bg-[rgba(88,166,255,0.05)] border border-[#58a6ff]/10 cursor-pointer hover:border-[#58a6ff]/25 transition-colors group"
+        onClick={() => setEditing(true)}
+      >
+        <StickyNote size={14} className="text-[#58a6ff] shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <p className="text-[#8b949e] text-xs mb-0.5 flex items-center gap-1">
+            Order Notes
+            <Pencil size={10} className="opacity-0 group-hover:opacity-60 transition-opacity" />
+          </p>
+          {initialNotes
+            ? <p className="text-[#e6edf3] text-sm leading-relaxed">{initialNotes}</p>
+            : <p className="text-[#8b949e] text-xs italic">Click to add notes…</p>
+          }
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-3 rounded-lg bg-[rgba(88,166,255,0.05)] border border-[#58a6ff]/30">
+      <p className="text-[#8b949e] text-xs mb-2 flex items-center gap-1"><StickyNote size={12} /> Order Notes</p>
+      <textarea
+        autoFocus
+        className="w-full bg-[#0d1117] border border-[rgba(48,54,61,0.6)] rounded-lg px-3 py-2 text-sm text-[#e6edf3] resize-none focus:outline-none focus:border-[#58a6ff]/50 min-h-[80px]"
+        placeholder="E.g. 'Ordered extra for holidays', 'Rep said prices rising next month'…"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+      <div className="flex gap-2 mt-2">
+        <button
+          onClick={() => saveMutation.mutate(draft)}
+          disabled={saveMutation.isPending}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[#58a6ff]/20 text-[#58a6ff] hover:bg-[#58a6ff]/30 transition-colors font-medium"
+        >
+          <Save size={12} /> {saveMutation.isPending ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          onClick={() => { setEditing(false); setDraft(initialNotes || '') }}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg text-[#8b949e] hover:text-[#e6edf3] transition-colors"
+        >
+          <X size={12} /> Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Split card ─────────────────────────────────────────────────────────────
+function SplitCard({ split }) {
   const [linkInfo, setLinkInfo] = useState(null)
 
   const generateLink = async () => {
@@ -42,18 +109,17 @@ function SplitCard({ split, orderId }) {
           split.status === 'sent' ? 'bg-blue-900/50 text-blue-400' :
           'bg-gray-700 text-gray-400'
         }`}>
-          {split.status === 'confirmed' ? <CheckCircle size={10} className="inline mr-1" /> :
-           split.status === 'sent' ? <Clock size={10} className="inline mr-1" /> : null}
+          {split.status === 'confirmed' && <CheckCircle size={10} className="inline mr-1" />}
+          {split.status === 'sent' && <Clock size={10} className="inline mr-1" />}
           {split.status}
         </span>
       </div>
 
-      {/* Min order warning */}
       {belowMin && (
         <div className="flex items-center gap-1.5 mt-2 px-2.5 py-1.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
           <AlertTriangle size={12} className="text-yellow-400 shrink-0" />
           <p className="text-yellow-400 text-xs">
-            Below minimum order of {formatCurrency(split.company_min_order)} —
+            Below minimum of {formatCurrency(split.company_min_order)} —
             {' '}short by {formatCurrency(split.company_min_order - split.subtotal)}
           </p>
         </div>
@@ -78,6 +144,7 @@ function SplitCard({ split, orderId }) {
   )
 }
 
+// ── Order detail expanded view ─────────────────────────────────────────────
 function OrderDetail({ orderId }) {
   const { data: order } = useQuery({
     queryKey: ['order', orderId],
@@ -100,7 +167,7 @@ function OrderDetail({ orderId }) {
   if (!order) return <LoadingSpinner />
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Summary */}
       <div className="grid grid-cols-3 gap-4">
         <div className="glass-card p-4 text-center">
@@ -116,6 +183,9 @@ function OrderDetail({ orderId }) {
           <p className="text-2xl font-bold text-green-400">{order.deal_items_count ?? 0}</p>
         </div>
       </div>
+
+      {/* Notes */}
+      <OrderNotes orderId={orderId} initialNotes={order.notes} />
 
       <div className="grid grid-cols-2 gap-6">
         {/* Items table */}
@@ -159,6 +229,7 @@ function OrderDetail({ orderId }) {
   )
 }
 
+// ── Reorder button ─────────────────────────────────────────────────────────
 function ReorderButton({ orderId }) {
   const { addResolvedItem } = useOrderStore()
   const [loading, setLoading] = useState(false)
@@ -200,6 +271,7 @@ function ReorderButton({ orderId }) {
   )
 }
 
+// ── Main page ──────────────────────────────────────────────────────────────
 export default function OrderHistoryPage() {
   const [searchParams] = useSearchParams()
   const reviewId = searchParams.get('review')
@@ -221,7 +293,15 @@ export default function OrderHistoryPage() {
               onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}
             >
               <div className="min-w-0 flex-1">
-                <p className="text-[#e6edf3] font-medium">{order.order_month}</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-[#e6edf3] font-medium">{order.order_month}</p>
+                  {/* Note indicator */}
+                  {order.notes && (
+                    <span title={order.notes}>
+                      <StickyNote size={13} className="text-[#58a6ff] opacity-70" />
+                    </span>
+                  )}
+                </div>
                 <p className="text-[#8b949e] text-xs mt-0.5">
                   {order.total_items ?? '?'} items · {formatCurrency(order.total_value)}
                 </p>

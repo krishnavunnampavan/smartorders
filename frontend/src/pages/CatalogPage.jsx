@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useDropzone } from 'react-dropzone'
-import { Upload, Globe, Zap, CheckCircle, RefreshCw } from 'lucide-react'
+import {
+  Upload, Globe, Zap, CheckCircle, RefreshCw, Clock,
+  AlertTriangle, FileText, ChevronDown, ChevronUp,
+} from 'lucide-react'
 import toast from 'react-hot-toast'
 import Layout from '../components/layout/Layout'
 import PriceTagBadge from '../components/shared/PriceTagBadge'
@@ -9,9 +12,136 @@ import LoadingSpinner from '../components/shared/LoadingSpinner'
 import client from '../api/client'
 import { formatCurrency, thisMonth } from '../utils/formatters'
 
-// ── Monaco's import panel ──────────────────────────────────────────────────
+// ── Upload history with freshness ─────────────────────────────────────────
+function daysAgo(isoString) {
+  if (!isoString) return null
+  const diff = Date.now() - new Date(isoString).getTime()
+  return Math.floor(diff / (1000 * 60 * 60 * 24))
+}
+
+function FreshnessChip({ days }) {
+  if (days === null) return null
+  if (days === 0) return <span className="text-xs px-2 py-0.5 rounded-full bg-green-900/40 text-green-400">Today</span>
+  if (days <= 7) return <span className="text-xs px-2 py-0.5 rounded-full bg-green-900/30 text-green-400">{days}d ago</span>
+  if (days <= 30) return <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-900/30 text-yellow-400">{days}d ago</span>
+  return (
+    <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-900/30 text-red-400">
+      <AlertTriangle size={10} /> {days}d ago — stale
+    </span>
+  )
+}
+
+function UploadHistory({ onSelectCompany }) {
+  const [expanded, setExpanded] = useState(true)
+
+  const { data: uploads, isLoading } = useQuery({
+    queryKey: ['catalog-uploads'],
+    queryFn: () => client.get('/catalog/uploads').then((r) => r.data),
+    staleTime: 30_000,
+  })
+
+  if (isLoading) return null
+  if (!uploads?.length) return (
+    <div className="glass-card p-4 mb-5">
+      <div className="flex items-center gap-2 mb-1">
+        <Clock size={15} className="text-[#8b949e]" />
+        <h2 className="text-[#e6edf3] font-semibold text-sm">Upload History</h2>
+      </div>
+      <p className="text-[#8b949e] text-xs">No catalogs uploaded yet.</p>
+    </div>
+  )
+
+  // Group by company — show latest upload per company at the top
+  const byCompany = {}
+  for (const u of uploads) {
+    const cid = u.company_id || 'unknown'
+    if (!byCompany[cid]) byCompany[cid] = []
+    byCompany[cid].push(u)
+  }
+
+  // Stale companies (latest upload > 30 days ago)
+  const staleCount = Object.values(byCompany).filter((list) => {
+    const latest = list[0]
+    return daysAgo(latest.created_at) > 30
+  }).length
+
+  return (
+    <div className="glass-card mb-5">
+      <button
+        className="w-full flex items-center justify-between px-4 py-3 border-b border-[rgba(48,54,61,0.5)]"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <div className="flex items-center gap-2">
+          <Clock size={15} className="text-[#58a6ff]" />
+          <span className="text-[#e6edf3] font-semibold text-sm">Upload History</span>
+          <span className="text-xs text-[#8b949e] bg-[rgba(48,54,61,0.6)] px-2 py-0.5 rounded-full">
+            {Object.keys(byCompany).length} companies
+          </span>
+          {staleCount > 0 && (
+            <span className="flex items-center gap-1 text-xs text-red-400 bg-red-900/20 px-2 py-0.5 rounded-full">
+              <AlertTriangle size={10} /> {staleCount} stale
+            </span>
+          )}
+        </div>
+        {expanded ? <ChevronUp size={15} className="text-[#8b949e]" /> : <ChevronDown size={15} className="text-[#8b949e]" />}
+      </button>
+
+      {expanded && (
+        <div className="divide-y divide-[rgba(48,54,61,0.4)]">
+          {Object.entries(byCompany).map(([cid, list]) => {
+            const latest = list[0]
+            const days = daysAgo(latest.created_at)
+            const isStale = days > 30
+
+            return (
+              <div key={cid} className={`px-4 py-3 ${isStale ? 'bg-red-900/5' : ''}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-[#e6edf3] text-sm font-medium truncate">{latest.company_name}</p>
+                      <FreshnessChip days={days} />
+                    </div>
+                    <div className="flex items-center gap-3 mt-1 text-[#8b949e] text-xs flex-wrap">
+                      <span className="flex items-center gap-1">
+                        <FileText size={10} /> {latest.file_name || 'catalog'}
+                      </span>
+                      <span>{latest.items_parsed} parsed · {latest.items_matched} matched</span>
+                      <span>{latest.upload_month}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {isStale && (
+                      <span className="text-[10px] text-red-400 text-right leading-tight hidden sm:block">
+                        Update<br />needed
+                      </span>
+                    )}
+                    <button
+                      onClick={() => onSelectCompany(latest.company_id, latest.upload_month)}
+                      className="text-xs px-2.5 py-1 rounded-lg bg-[#58a6ff]/10 text-[#58a6ff] hover:bg-[#58a6ff]/20 transition-colors whitespace-nowrap"
+                    >
+                      View prices
+                    </button>
+                  </div>
+                </div>
+
+                {/* Past uploads for this company (collapsed, show count) */}
+                {list.length > 1 && (
+                  <p className="text-[#8b949e] text-[10px] mt-1.5">
+                    + {list.length - 1} previous upload{list.length > 2 ? 's' : ''}
+                  </p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Monaco auto-import ────────────────────────────────────────────────────
 function MonacoImport({ onDone }) {
-  const [status, setStatus] = useState(null) // null | 'previewing' | 'importing' | 'done'
+  const [status, setStatus] = useState(null)
   const [preview, setPreview] = useState(null)
 
   const handlePreview = async () => {
@@ -20,9 +150,7 @@ function MonacoImport({ onDone }) {
       const { data } = await client.get('/scraper/preview?max_products=30')
       setPreview(data)
       setStatus('previewed')
-    } catch {
-      setStatus(null)
-    }
+    } catch { setStatus(null) }
   }
 
   const handleImport = async () => {
@@ -36,9 +164,7 @@ function MonacoImport({ onDone }) {
       setPreview(null)
       setStatus('done')
       onDone?.()
-    } catch {
-      setStatus(null)
-    }
+    } catch { setStatus(null) }
   }
 
   return (
@@ -100,7 +226,7 @@ function MonacoImport({ onDone }) {
           </div>
           {preview.errors?.length > 0 && (
             <p className="text-yellow-400 text-xs mt-2">
-              ⚠ {preview.errors.length} page(s) blocked by site — imported what was accessible.
+              ⚠ {preview.errors.length} page(s) blocked — imported what was accessible.
             </p>
           )}
         </div>
@@ -115,7 +241,7 @@ function MonacoImport({ onDone }) {
   )
 }
 
-// ── Catalog upload zone ────────────────────────────────────────────────────
+// ── Manual upload zone ────────────────────────────────────────────────────
 function UploadZone({ companies, onUploadDone }) {
   const [companyId, setCompanyId] = useState('')
   const [month, setMonth] = useState(thisMonth().slice(0, 7))
@@ -227,7 +353,11 @@ function PriceCompareTable({ companyId, month }) {
       {/* Mobile cards */}
       <div className="space-y-2 lg:hidden">
         {allItems.map((item, i) => (
-          <div key={i} className={`p-3 rounded-lg border ${item._g === 'deal' ? 'border-green-800/50 bg-green-900/10' : item._g === 'hold' ? 'border-red-800/50 bg-red-900/10' : 'border-[rgba(48,54,61,0.5)]'}`}>
+          <div key={i} className={`p-3 rounded-lg border ${
+            item._g === 'deal' ? 'border-green-800/50 bg-green-900/10' :
+            item._g === 'hold' ? 'border-red-800/50 bg-red-900/10' :
+            'border-[rgba(48,54,61,0.5)]'
+          }`}>
             <div className="flex justify-between items-start mb-1">
               <p className="text-[#e6edf3] text-sm font-medium flex-1 mr-2">{item.product_name}</p>
               <PriceTagBadge status={item.status} />
@@ -256,7 +386,9 @@ function PriceCompareTable({ companyId, month }) {
           </thead>
           <tbody>
             {allItems.map((item, i) => (
-              <tr key={i} className={`border-b border-[rgba(48,54,61,0.3)] ${item._g === 'deal' ? 'bg-green-500/5' : item._g === 'hold' ? 'bg-red-500/5' : ''}`}>
+              <tr key={i} className={`border-b border-[rgba(48,54,61,0.3)] ${
+                item._g === 'deal' ? 'bg-green-500/5' : item._g === 'hold' ? 'bg-red-500/5' : ''
+              }`}>
                 <td className="py-2.5 text-[#e6edf3]">{item.product_name}</td>
                 <td className="py-2.5 text-right text-[#8b949e] font-mono">${(item.prev_price || 0).toFixed(2)}</td>
                 <td className="py-2.5 text-right text-[#e6edf3] font-mono">${(item.new_price || 0).toFixed(2)}</td>
@@ -288,28 +420,46 @@ export default function CatalogPage() {
   const handleImportDone = () => {
     qc.invalidateQueries(['companies'])
     qc.invalidateQueries(['products'])
+    qc.invalidateQueries(['catalog-uploads'])
+  }
+
+  const handleUploadDone = (companyId, month) => {
+    qc.invalidateQueries(['catalog-uploads'])
+    setViewCompanyId(companyId)
+    setViewMonth(month)
+  }
+
+  const handleSelectCompany = (companyId, uploadMonth) => {
+    setViewCompanyId(companyId)
+    setViewMonth(uploadMonth)
+    // Scroll to price compare section
+    setTimeout(() => {
+      document.getElementById('price-compare-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 100)
   }
 
   return (
     <Layout title="Catalog & Price Intelligence">
-      {/* Monaco's auto-import */}
+      {/* Monaco auto-import */}
       <MonacoImport onDone={handleImportDone} />
 
       {/* Manual catalog upload */}
-      <UploadZone
-        companies={companies}
-        onUploadDone={(c, m) => { setViewCompanyId(c); setViewMonth(m) }}
-      />
+      <UploadZone companies={companies} onUploadDone={handleUploadDone} />
 
-      {/* Price compare view */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-4">
-        <select className="input-field flex-1" value={viewCompanyId} onChange={(e) => setViewCompanyId(e.target.value)}>
-          <option value="">Select company to view price comparison…</option>
-          {companies?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-        <input type="date" className="input-field sm:w-44" value={viewMonth} onChange={(e) => setViewMonth(e.target.value)} />
+      {/* Upload history */}
+      <UploadHistory onSelectCompany={handleSelectCompany} />
+
+      {/* Price compare section */}
+      <div id="price-compare-section">
+        <div className="flex flex-col sm:flex-row gap-3 mb-4">
+          <select className="input-field flex-1" value={viewCompanyId} onChange={(e) => setViewCompanyId(e.target.value)}>
+            <option value="">Select company to view price comparison…</option>
+            {companies?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <input type="date" className="input-field sm:w-44" value={viewMonth} onChange={(e) => setViewMonth(e.target.value)} />
+        </div>
+        {viewCompanyId && <PriceCompareTable companyId={viewCompanyId} month={viewMonth} />}
       </div>
-      {viewCompanyId && <PriceCompareTable companyId={viewCompanyId} month={viewMonth} />}
     </Layout>
   )
 }

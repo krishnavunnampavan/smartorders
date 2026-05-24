@@ -1,15 +1,19 @@
-import { useState, useCallback } from 'react'
+import { useState, Fragment } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Edit2, Trash2, Package, Search, X, ChevronUp, ChevronDown,
-  AlertTriangle, CheckCircle, XCircle,
+  TrendingUp, TrendingDown, Minus,
 } from 'lucide-react'
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine,
+} from 'recharts'
 import toast from 'react-hot-toast'
 import Layout from '../components/layout/Layout'
 import ConfirmModal from '../components/shared/ConfirmModal'
 import LoadingSpinner from '../components/shared/LoadingSpinner'
 import client from '../api/client'
 import { useDebounce } from '../hooks/useDebounce'
+import { formatCurrency } from '../utils/formatters'
 
 const CATEGORIES = [
   'All',
@@ -22,6 +26,136 @@ const SIZE_OPTS = ['50ml','100ml','187ml','200ml','375ml','500ml','750ml','1L','
 const EMPTY_FORM = {
   name: '', sku: '', barcode: '', category: '', brand: '', unit_size: '',
   company_id: '', reorder_level: 2, current_stock: 0, aliases: [], notes: '', is_active: true,
+}
+
+const STATUS_DOT = {
+  DEAL: 'bg-green-400',
+  RECOVERY_DEAL: 'bg-emerald-400',
+  HOLD: 'bg-red-400',
+  STABLE: 'bg-[#8b949e]',
+}
+
+// ── Price history sparkline panel ─────────────────────────────────────────
+function PriceHistoryPanel({ productId, currentPrice }) {
+  const { data: history, isLoading } = useQuery({
+    queryKey: ['price-history', productId],
+    queryFn: () => client.get(`/products/${productId}/price-history?months=12`).then((r) => r.data),
+    enabled: !!productId,
+    staleTime: 60_000,
+  })
+
+  if (isLoading) return (
+    <div className="flex justify-center py-4"><LoadingSpinner /></div>
+  )
+
+  if (!history?.length) return (
+    <p className="text-[#8b949e] text-xs py-3 text-center">
+      No price history yet — upload a catalog to start tracking.
+    </p>
+  )
+
+  const prices = history.map((h) => h.unit_price)
+  const minP = Math.min(...prices)
+  const maxP = Math.max(...prices)
+  const first = prices[0]
+  const last = prices[prices.length - 1]
+  const trend = last - first
+
+  const CustomDot = ({ cx, cy, payload }) => {
+    const colors = { DEAL: '#3fb950', RECOVERY_DEAL: '#10b981', HOLD: '#f85149', STABLE: '#8b949e' }
+    const fill = colors[payload.status] || '#8b949e'
+    return <circle cx={cx} cy={cy} r={4} fill={fill} stroke="#161b22" strokeWidth={2} />
+  }
+
+  const CustomTooltip = ({ active, payload }) => {
+    if (!active || !payload?.length) return null
+    const { month, unit_price, status } = payload[0].payload
+    return (
+      <div className="bg-[#0d1117] border border-[rgba(48,54,61,0.8)] rounded-lg px-2.5 py-1.5 text-xs shadow-xl">
+        <p className="text-[#8b949e]">{month}</p>
+        <p className="text-[#e6edf3] font-medium">{formatCurrency(unit_price)}</p>
+        {status && status !== 'STABLE' && (
+          <p className={`font-bold ${status === 'DEAL' || status === 'RECOVERY_DEAL' ? 'text-green-400' : 'text-red-400'}`}>
+            {status}
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="px-4 pb-4 pt-2">
+      {/* Stats row */}
+      <div className="flex items-center gap-4 mb-3">
+        <div className="text-xs">
+          <span className="text-[#8b949e]">Low </span>
+          <span className="text-[#e6edf3] font-mono">{formatCurrency(minP)}</span>
+        </div>
+        <div className="text-xs">
+          <span className="text-[#8b949e]">High </span>
+          <span className="text-[#e6edf3] font-mono">{formatCurrency(maxP)}</span>
+        </div>
+        <div className="text-xs">
+          <span className="text-[#8b949e]">Current </span>
+          <span className="text-[#e6edf3] font-mono">{formatCurrency(last)}</span>
+        </div>
+        <div className="ml-auto flex items-center gap-1 text-xs">
+          {trend < -0.005 ? (
+            <><TrendingDown size={13} className="text-green-400" /><span className="text-green-400">{formatCurrency(Math.abs(trend))} cheaper</span></>
+          ) : trend > 0.005 ? (
+            <><TrendingUp size={13} className="text-red-400" /><span className="text-red-400">{formatCurrency(trend)} pricier</span></>
+          ) : (
+            <><Minus size={13} className="text-[#8b949e]" /><span className="text-[#8b949e]">Stable</span></>
+          )}
+          <span className="text-[#8b949e] ml-1">vs first record</span>
+        </div>
+      </div>
+
+      <ResponsiveContainer width="100%" height={110}>
+        <LineChart data={history} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+          <XAxis
+            dataKey="month"
+            tick={{ fill: '#8b949e', fontSize: 9 }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={(v) => v.slice(0, 7)}
+          />
+          <YAxis
+            domain={['auto', 'auto']}
+            tick={{ fill: '#8b949e', fontSize: 9 }}
+            axisLine={false}
+            tickLine={false}
+            width={38}
+            tickFormatter={(v) => `$${v.toFixed(0)}`}
+          />
+          <Tooltip content={<CustomTooltip />} />
+          {currentPrice && (
+            <ReferenceLine y={currentPrice} stroke="#58a6ff" strokeDasharray="3 3" strokeOpacity={0.4} />
+          )}
+          <Line
+            type="monotone"
+            dataKey="unit_price"
+            stroke="#58a6ff"
+            strokeWidth={2}
+            dot={<CustomDot />}
+            activeDot={{ r: 5 }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+
+      {/* Legend */}
+      <div className="flex items-center gap-3 mt-1 flex-wrap">
+        {[['DEAL', 'bg-green-400', 'Deal'], ['HOLD', 'bg-red-400', 'Hold'], ['STABLE', 'bg-[#8b949e]', 'Stable']].map(([k, cls, label]) => (
+          <div key={k} className="flex items-center gap-1 text-[10px] text-[#8b949e]">
+            <span className={`w-2 h-2 rounded-full ${cls}`} /> {label}
+          </div>
+        ))}
+        <div className="flex items-center gap-1 text-[10px] text-[#8b949e]">
+          <span className="w-4 border-t border-dashed border-[#58a6ff] opacity-40" /> Current price
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function CategoryBadge({ category }) {
@@ -38,8 +172,7 @@ function CategoryBadge({ category }) {
     'Tobacco': 'bg-stone-800 text-stone-300',
     'Spirits & Other': 'bg-indigo-900/40 text-indigo-300',
   }
-  const cls = colors[category] || 'bg-gray-800 text-gray-300'
-  return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>{category || '—'}</span>
+  return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${colors[category] || 'bg-gray-800 text-gray-300'}`}>{category || '—'}</span>
 }
 
 function StockBadge({ current, reorder }) {
@@ -50,30 +183,19 @@ function StockBadge({ current, reorder }) {
 
 function ProductModal({ product, companies, onClose, onSave }) {
   const [form, setForm] = useState(product ? {
-    name: product.name || '',
-    sku: product.sku || '',
-    barcode: product.barcode || '',
-    category: product.category || '',
-    brand: product.brand || '',
-    unit_size: product.unit_size || '',
-    company_id: product.company_id || '',
-    reorder_level: product.reorder_level ?? 2,
-    current_stock: product.current_stock ?? 0,
-    aliases: product.aliases || [],
-    is_active: product.is_active ?? true,
+    name: product.name || '', sku: product.sku || '', barcode: product.barcode || '',
+    category: product.category || '', brand: product.brand || '', unit_size: product.unit_size || '',
+    company_id: product.company_id || '', reorder_level: product.reorder_level ?? 2,
+    current_stock: product.current_stock ?? 0, aliases: product.aliases || [], is_active: product.is_active ?? true,
   } : { ...EMPTY_FORM })
   const [aliasInput, setAliasInput] = useState('')
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
-
   const addAlias = () => {
     const a = aliasInput.trim().toLowerCase()
-    if (a && !form.aliases.includes(a)) {
-      set('aliases', [...form.aliases, a])
-    }
+    if (a && !form.aliases.includes(a)) set('aliases', [...form.aliases, a])
     setAliasInput('')
   }
-
   const submit = () => {
     if (!form.name.trim()) { toast.error('Product name is required'); return }
     const body = { ...form }
@@ -85,12 +207,9 @@ function ProductModal({ product, companies, onClose, onSave }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
       <div className="glass-card w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-[#e6edf3] font-semibold text-lg">
-            {product ? 'Edit Product' : 'Add Product'}
-          </h2>
+          <h2 className="text-[#e6edf3] font-semibold text-lg">{product ? 'Edit Product' : 'Add Product'}</h2>
           <button onClick={onClose} className="text-[#8b949e] hover:text-[#e6edf3]"><X size={20} /></button>
         </div>
-
         <div className="grid grid-cols-2 gap-4">
           <div className="col-span-2">
             <label className="block text-[#8b949e] text-xs mb-1">Product Name *</label>
@@ -139,11 +258,10 @@ function ProductModal({ product, companies, onClose, onSave }) {
             <input type="number" min={0} className="input-field" value={form.current_stock}
               onChange={(e) => set('current_stock', parseInt(e.target.value) || 0)} />
           </div>
-
           <div className="col-span-2">
             <label className="block text-[#8b949e] text-xs mb-1">Aliases (for voice/AI matching)</label>
             <div className="flex gap-2 mb-2">
-              <input className="input-field flex-1" placeholder='e.g. "henny", "jack"'
+              <input className="input-field flex-1" placeholder='"henny", "jack"'
                 value={aliasInput} onChange={(e) => setAliasInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addAlias())} />
               <button className="btn-secondary px-3" onClick={addAlias}>Add</button>
@@ -157,18 +275,14 @@ function ProductModal({ product, companies, onClose, onSave }) {
               ))}
             </div>
           </div>
-
           <div className="col-span-2 flex items-center gap-2">
             <input type="checkbox" id="is_active" checked={form.is_active}
               onChange={(e) => set('is_active', e.target.checked)} className="accent-[#58a6ff]" />
             <label htmlFor="is_active" className="text-[#8b949e] text-sm cursor-pointer">Active</label>
           </div>
         </div>
-
         <div className="flex gap-3 mt-6">
-          <button className="btn-primary flex-1" onClick={submit}>
-            {product ? 'Save Changes' : 'Create Product'}
-          </button>
+          <button className="btn-primary flex-1" onClick={submit}>{product ? 'Save Changes' : 'Create Product'}</button>
           <button className="btn-secondary px-4" onClick={onClose}>Cancel</button>
         </div>
       </div>
@@ -179,7 +293,6 @@ function ProductModal({ product, companies, onClose, onSave }) {
 function StockModal({ product, onClose, onSave }) {
   const [newStock, setNewStock] = useState(product.current_stock)
   const [reason, setReason] = useState('delivery')
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
       <div className="glass-card w-full max-w-sm p-6">
@@ -222,6 +335,7 @@ export default function ProductsPage() {
   const [showModal, setShowModal] = useState(false)
   const [deleteId, setDeleteId] = useState(null)
   const [stockProduct, setStockProduct] = useState(null)
+  const [expandedId, setExpandedId] = useState(null)
 
   const debouncedSearch = useDebounce(search, 200)
 
@@ -243,13 +357,10 @@ export default function ProductsPage() {
 
   const saveMutation = useMutation({
     mutationFn: (body) =>
-      editProduct?.id
-        ? client.put(`/products/${editProduct.id}`, body)
-        : client.post('/products', body),
+      editProduct?.id ? client.put(`/products/${editProduct.id}`, body) : client.post('/products', body),
     onSuccess: () => {
       qc.invalidateQueries(['products'])
-      setShowModal(false)
-      setEditProduct(null)
+      setShowModal(false); setEditProduct(null)
       toast.success(editProduct?.id ? 'Product updated' : 'Product created')
     },
   })
@@ -263,10 +374,8 @@ export default function ProductsPage() {
     mutationFn: ({ id, stock, reason }) =>
       client.post(`/products/${id}/stock`, { new_stock: stock, change_reason: reason }),
     onSuccess: () => {
-      qc.invalidateQueries(['products'])
-      qc.invalidateQueries(['inventory-alerts'])
-      setStockProduct(null)
-      toast.success('Stock updated')
+      qc.invalidateQueries(['products']); qc.invalidateQueries(['inventory-alerts'])
+      setStockProduct(null); toast.success('Stock updated')
     },
   })
 
@@ -274,22 +383,22 @@ export default function ProductsPage() {
   const openEdit = (p) => { setEditProduct(p); setShowModal(true) }
 
   const sort = (key) => {
-    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    if (sortKey === key) setSortDir((d) => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('asc') }
   }
 
   const sorted = [...(products || [])].sort((a, b) => {
-    const av = a[sortKey] ?? '', bv = b[sortKey] ?? ''
-    const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true })
+    const cmp = String(a[sortKey] ?? '').localeCompare(String(b[sortKey] ?? ''), undefined, { numeric: true })
     return sortDir === 'asc' ? cmp : -cmp
   })
 
   const SortIcon = ({ k }) =>
     sortKey === k ? (sortDir === 'asc' ? <ChevronUp size={13} /> : <ChevronDown size={13} />) : null
 
+  const toggleExpand = (id) => setExpandedId((prev) => prev === id ? null : id)
+
   return (
     <Layout title="Items List">
-      {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="relative flex-1 min-w-48">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e]" />
@@ -307,21 +416,17 @@ export default function ProductsPage() {
         </button>
       </div>
 
-      {/* Category tabs */}
       <div className="flex gap-1 overflow-x-auto pb-1 mb-4 -mx-1 px-1">
         {CATEGORIES.map((c) => (
           <button key={c} onClick={() => { setCategory(c); setPage(1) }}
             className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              category === c
-                ? 'bg-[#58a6ff]/20 text-[#58a6ff]'
-                : 'bg-[#161b22] text-[#8b949e] hover:text-[#e6edf3]'
+              category === c ? 'bg-[#58a6ff]/20 text-[#58a6ff]' : 'bg-[#161b22] text-[#8b949e] hover:text-[#e6edf3]'
             }`}>
             {c}
           </button>
         ))}
       </div>
 
-      {/* Table */}
       <div className="glass-card overflow-hidden">
         {isLoading ? (
           <div className="flex justify-center py-16"><LoadingSpinner /></div>
@@ -344,43 +449,70 @@ export default function ProductsPage() {
                       </th>
                     ))}
                     <th className="text-left px-4 py-3">Distributor</th>
+                    <th className="px-4 py-3 text-center text-[#8b949e] text-xs">Price History</th>
                     <th className="px-4 py-3">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sorted.map((p) => (
-                    <tr key={p.id} className="border-b border-[rgba(48,54,61,0.3)] hover:bg-[rgba(48,54,61,0.2)]">
-                      <td className="px-4 py-3">
-                        <p className="text-[#e6edf3] font-medium leading-tight">{p.name}</p>
-                        {p.sku && <p className="text-[#8b949e] text-xs">{p.sku}</p>}
-                      </td>
-                      <td className="px-4 py-3 text-[#8b949e]">{p.unit_size || '—'}</td>
-                      <td className="px-4 py-3"><CategoryBadge category={p.category} /></td>
-                      <td className="px-4 py-3">
-                        <StockBadge current={p.current_stock} reorder={p.reorder_level} />
-                      </td>
-                      <td className="px-4 py-3 text-[#8b949e] text-xs">{p.reorder_level}</td>
-                      <td className="px-4 py-3 text-[#8b949e] text-xs">
-                        {companies?.find((c) => c.id === p.company_id)?.name || '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <button title="Edit" className="p-1.5 text-[#8b949e] hover:text-[#58a6ff]"
-                            onClick={() => openEdit(p)}><Edit2 size={14} /></button>
-                          <button title="Update Stock"
-                            className="p-1.5 text-[#8b949e] hover:text-yellow-400"
-                            onClick={() => setStockProduct(p)}>
-                            <Package size={14} />
+                    <Fragment key={p.id}>
+                      <tr className={`border-b border-[rgba(48,54,61,0.3)] hover:bg-[rgba(48,54,61,0.2)] ${expandedId === p.id ? 'bg-[rgba(88,166,255,0.04)]' : ''}`}>
+                        <td className="px-4 py-3">
+                          <p className="text-[#e6edf3] font-medium leading-tight">{p.name}</p>
+                          {p.sku && <p className="text-[#8b949e] text-xs">{p.sku}</p>}
+                        </td>
+                        <td className="px-4 py-3 text-[#8b949e]">{p.unit_size || '—'}</td>
+                        <td className="px-4 py-3"><CategoryBadge category={p.category} /></td>
+                        <td className="px-4 py-3"><StockBadge current={p.current_stock} reorder={p.reorder_level} /></td>
+                        <td className="px-4 py-3 text-[#8b949e] text-xs">{p.reorder_level}</td>
+                        <td className="px-4 py-3 text-[#8b949e] text-xs">
+                          {companies?.find((c) => c.id === p.company_id)?.name || '—'}
+                        </td>
+                        {/* Price history toggle */}
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={() => toggleExpand(p.id)}
+                            className={`text-xs px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 mx-auto ${
+                              expandedId === p.id
+                                ? 'bg-[#58a6ff]/20 text-[#58a6ff]'
+                                : 'text-[#8b949e] hover:text-[#58a6ff] hover:bg-[#58a6ff]/10'
+                            }`}
+                          >
+                            {expandedId === p.id ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                            Chart
                           </button>
-                          <button title="Delete" className="p-1.5 text-[#8b949e] hover:text-red-400"
-                            onClick={() => setDeleteId(p.id)}><Trash2 size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1">
+                            <button title="Edit" className="p-1.5 text-[#8b949e] hover:text-[#58a6ff]"
+                              onClick={() => openEdit(p)}><Edit2 size={14} /></button>
+                            <button title="Update Stock" className="p-1.5 text-[#8b949e] hover:text-yellow-400"
+                              onClick={() => setStockProduct(p)}><Package size={14} /></button>
+                            <button title="Delete" className="p-1.5 text-[#8b949e] hover:text-red-400"
+                              onClick={() => setDeleteId(p.id)}><Trash2 size={14} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                      {/* Expandable price history row */}
+                      {expandedId === p.id && (
+                        <tr className="border-b border-[rgba(48,54,61,0.3)] bg-[rgba(88,166,255,0.03)]">
+                          <td colSpan={8} className="px-0 py-0">
+                            <div className="border-t border-[#58a6ff]/10">
+                              <div className="px-4 pt-3 pb-0">
+                                <p className="text-[#8b949e] text-xs font-medium uppercase tracking-wider mb-2">
+                                  Price History — {p.name}
+                                </p>
+                              </div>
+                              <PriceHistoryPanel productId={p.id} currentPrice={p.unit_price} />
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                   {sorted.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-16 text-center text-[#8b949e]">
+                      <td colSpan={8} className="px-4 py-16 text-center text-[#8b949e]">
                         {search ? `No products matching "${search}"` : 'No products found.'}
                       </td>
                     </tr>
@@ -389,7 +521,6 @@ export default function ProductsPage() {
               </table>
             </div>
 
-            {/* Pagination */}
             <div className="flex items-center justify-between px-4 py-3 border-t border-[rgba(48,54,61,0.8)]">
               <p className="text-[#8b949e] text-xs">
                 Showing {sorted.length} items{search && ` for "${search}"`}
@@ -406,21 +537,14 @@ export default function ProductsPage() {
         )}
       </div>
 
-      {/* Modals */}
       {showModal && (
-        <ProductModal
-          product={editProduct}
-          companies={companies}
+        <ProductModal product={editProduct} companies={companies}
           onClose={() => { setShowModal(false); setEditProduct(null) }}
-          onSave={(body) => saveMutation.mutate(body)}
-        />
+          onSave={(body) => saveMutation.mutate(body)} />
       )}
       {stockProduct && (
-        <StockModal
-          product={stockProduct}
-          onClose={() => setStockProduct(null)}
-          onSave={(stock, reason) => stockMutation.mutate({ id: stockProduct.id, stock, reason })}
-        />
+        <StockModal product={stockProduct} onClose={() => setStockProduct(null)}
+          onSave={(stock, reason) => stockMutation.mutate({ id: stockProduct.id, stock, reason })} />
       )}
       <ConfirmModal
         open={!!deleteId}

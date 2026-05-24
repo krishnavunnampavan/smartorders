@@ -131,6 +131,26 @@ def update_stock(product_id: UUID, body: StockUpdateIn, db: Session = Depends(ge
     return {"product_id": str(product_id), "new_stock": body.new_stock}
 
 
+@router.get("/{product_id}/price-history")
+def product_price_history(product_id: UUID, months: int = Query(12, ge=1, le=36), db: Session = Depends(get_db)):
+    from app.models import PriceHistory
+    history = (
+        db.query(PriceHistory)
+        .filter_by(product_id=product_id)
+        .order_by(PriceHistory.effective_month)
+        .limit(months)
+        .all()
+    )
+    return [
+        {
+            "month": str(ph.effective_month),
+            "unit_price": float(ph.unit_price),
+            "status": ph.status or "STABLE",
+        }
+        for ph in history
+    ]
+
+
 @router.post("/{product_id}/alias")
 def add_alias(product_id: UUID, alias: str, db: Session = Depends(get_db)):
     from app.utils.fuzzy_match import save_alias

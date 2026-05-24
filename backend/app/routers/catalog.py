@@ -119,12 +119,30 @@ async def upload_catalog(
     return upload
 
 
-@router.get("/uploads", response_model=list[CatalogUploadOut])
+@router.get("/uploads")
 def list_uploads(company_id: Optional[UUID] = None, db: Session = Depends(get_db)):
+    from app.models.company import Company
     q = db.query(CatalogUpload)
     if company_id:
         q = q.filter_by(company_id=company_id)
-    return q.order_by(CatalogUpload.created_at.desc()).limit(50).all()
+    uploads = q.order_by(CatalogUpload.created_at.desc()).limit(50).all()
+    result = []
+    for u in uploads:
+        company = db.get(Company, u.company_id) if u.company_id else None
+        result.append({
+            "id": str(u.id),
+            "company_id": str(u.company_id) if u.company_id else None,
+            "company_name": company.name if company else "Unknown",
+            "upload_month": str(u.upload_month),
+            "file_name": u.file_name or "",
+            "file_type": u.file_type or "",
+            "status": u.status or "complete",
+            "ai_provider": u.ai_provider or "",
+            "items_parsed": u.items_parsed or 0,
+            "items_matched": u.items_matched or 0,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+        })
+    return result
 
 
 @router.get("/price-compare/{company_id}")
