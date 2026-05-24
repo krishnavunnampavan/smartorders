@@ -55,9 +55,29 @@ def update_order(order_id: UUID, body: OrderUpdate, db: Session = Depends(get_db
 
 # --- Items ---
 
-@router.get("/{order_id}/items", response_model=list[OrderItemOut])
+@router.get("/{order_id}/items")
 def list_items(order_id: UUID, db: Session = Depends(get_db)):
-    return db.query(OrderItem).filter_by(order_id=order_id).all()
+    from app.models import Company
+    items = db.query(OrderItem).filter_by(order_id=order_id).all()
+    result = []
+    for item in items:
+        product = db.get(Product, item.product_id)
+        company = db.get(Company, item.company_id) if item.company_id else None
+        result.append({
+            "id": str(item.id),
+            "product_id": str(item.product_id),
+            "company_id": str(item.company_id) if item.company_id else None,
+            "quantity": item.quantity,
+            "unit_price": float(item.unit_price) if item.unit_price else None,
+            "line_total": float(item.line_total) if item.line_total else None,
+            "price_status": item.price_status,
+            "price_change": float(item.price_change) if item.price_change else None,
+            "source": item.source,
+            "was_held": item.was_held,
+            "product_name": product.name if product else "Unknown Product",
+            "company_name": company.name if company else None,
+        })
+    return result
 
 
 @router.post("/{order_id}/items", response_model=OrderItemOut, status_code=201)

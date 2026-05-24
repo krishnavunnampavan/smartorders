@@ -1,14 +1,28 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, ShoppingCart } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Layout from '../components/layout/Layout'
 import client from '../api/client'
+import { useOrderStore } from '../store/orderStore'
 
 export default function InventoryPage() {
   const qc = useQueryClient()
   const [updateMap, setUpdateMap] = useState({})
   const [search, setSearch] = useState('')
+  const { addResolvedItem } = useOrderStore()
+
+  const addToOrder = (alert) => {
+    addResolvedItem({
+      product_id: alert.product_id,
+      product_name: alert.name,
+      company_id: alert.company_id || null,
+      quantity: alert.reorder_level || 1,
+      unit_price: 0,
+      source: 'inventory',
+    })
+    toast.success(`${alert.name} added to cart`)
+  }
 
   const { data: products } = useQuery({
     queryKey: ['products'],
@@ -38,15 +52,24 @@ export default function InventoryPage() {
     <Layout title="Inventory">
       {alerts?.length > 0 && (
         <div className="glass-card p-4 mb-4 border border-red-800/50 bg-red-900/10">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-3">
             <AlertTriangle size={16} className="text-red-400" />
-            <h2 className="text-red-400 font-semibold text-sm">Low Stock ({alerts.length})</h2>
+            <h2 className="text-red-400 font-semibold text-sm">Low Stock ({alerts.length}) — needs ordering</h2>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="space-y-2">
             {alerts.map((a) => (
-              <span key={a.product_id} className="text-xs bg-red-900/30 text-red-300 px-2 py-1 rounded-full">
-                {a.name} — {a.current_stock}/{a.reorder_level}
-              </span>
+              <div key={a.product_id} className="flex items-center justify-between gap-2">
+                <span className="text-xs text-red-300 flex-1 truncate">
+                  {a.name}
+                  <span className="text-red-400/60 ml-1">({a.current_stock}/{a.reorder_level})</span>
+                </span>
+                <button
+                  onClick={() => addToOrder(a)}
+                  className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-green-600/20 text-green-400 hover:bg-green-600/40 transition-colors shrink-0"
+                >
+                  <ShoppingCart size={11} /> Add to Order
+                </button>
+              </div>
             ))}
           </div>
         </div>

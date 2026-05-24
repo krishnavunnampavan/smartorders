@@ -1,11 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { TrendingDown, TrendingUp, ShoppingCart, AlertTriangle, Plus, Upload } from 'lucide-react'
+import { TrendingDown, TrendingUp, ShoppingCart, AlertTriangle, Plus, Upload, Truck, Phone } from 'lucide-react'
 import Layout from '../components/layout/Layout'
 import PriceTagBadge from '../components/shared/PriceTagBadge'
 import LoadingSpinner from '../components/shared/LoadingSpinner'
 import client from '../api/client'
 import { formatCurrency, thisMonth } from '../utils/formatters'
+import { useOrderStore } from '../store/orderStore'
+import toast from 'react-hot-toast'
 
 function StatCard({ label, value, sub, icon: Icon, color = 'text-[#58a6ff]' }) {
   return (
@@ -24,25 +26,94 @@ function StatCard({ label, value, sub, icon: Icon, color = 'text-[#58a6ff]' }) {
   )
 }
 
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+function TodaysDeliveries({ companies }) {
+  const today = DAY_NAMES[new Date().getDay()]
+  const delivering = (companies || []).filter((c) =>
+    c.delivery_days && c.delivery_days.toLowerCase().includes(today.toLowerCase())
+  )
+
+  return (
+    <div className="glass-card p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Truck size={16} className="text-[#58a6ff]" />
+        <h2 className="text-[#e6edf3] font-semibold text-sm">Today's Deliveries</h2>
+        <span className="text-[#8b949e] text-xs ml-auto">{today}</span>
+      </div>
+      {delivering.length === 0 ? (
+        <p className="text-[#8b949e] text-sm">No deliveries scheduled today.</p>
+      ) : (
+        <div className="space-y-2">
+          {delivering.map((c) => (
+            <div key={c.id} className="flex items-center justify-between p-2.5 rounded-lg bg-[rgba(88,166,255,0.07)] border border-[#58a6ff]/20">
+              <div className="min-w-0">
+                <p className="text-[#e6edf3] text-sm font-medium truncate">{c.name}</p>
+                {c.contact_name && (
+                  <p className="text-[#8b949e] text-xs truncate">{c.contact_name}</p>
+                )}
+              </div>
+              {c.phone && (
+                <a href={`tel:${c.phone}`}
+                  className="text-[#58a6ff] hover:text-[#79b8ff] p-1.5 rounded-lg hover:bg-[#58a6ff]/10 transition-colors shrink-0 ml-2"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Phone size={14} />
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PriceAlertFeed({ alerts }) {
+  const { addResolvedItem } = useOrderStore()
+
+  const addDealToCart = (item) => {
+    addResolvedItem({
+      product_id: item.product_id,
+      product_name: item.product_name,
+      company_id: item.company_id,
+      quantity: 1,
+      unit_price: item.new_price || 0,
+      price_status: item.status,
+      source: 'deal',
+    })
+    toast.success(`${item.product_name} added to cart`)
+  }
+
   const allItems = [
-    ...(alerts?.deals || []).map((d) => ({ ...d })),
-    ...(alerts?.holds || []).map((h) => ({ ...h })),
+    ...(alerts?.deals || []),
+    ...(alerts?.holds || []),
   ]
   if (!allItems.length) return <p className="text-[#8b949e] text-sm py-4 text-center">No price alerts for this month.</p>
 
   return (
-    <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
       {allItems.map((item, i) => (
         <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-[rgba(22,27,34,0.6)] border border-[rgba(48,54,61,0.5)]">
-          <div className="min-w-0 mr-2">
+          <div className="min-w-0 mr-2 flex-1">
             <p className="text-[#e6edf3] text-sm font-medium truncate">{item.product_name}</p>
             <p className="text-[#8b949e] text-xs">
               ${item.new_price?.toFixed(2)}
               {item.months_on_hold > 0 && ` · held ${item.months_on_hold}mo`}
             </p>
           </div>
-          <PriceTagBadge status={item.status} showChange change={item.change} />
+          <div className="flex items-center gap-2 shrink-0">
+            <PriceTagBadge status={item.status} showChange change={item.change} />
+            {(item.status === 'DEAL' || item.status === 'RECOVERY_DEAL') && (
+              <button
+                onClick={() => addDealToCart(item)}
+                className="text-xs px-2 py-1 rounded-lg bg-green-600/20 text-green-400 hover:bg-green-600/40 transition-colors font-medium"
+                title="Add to order"
+              >
+                + Add
+              </button>
+            )}
+          </div>
         </div>
       ))}
     </div>
@@ -64,6 +135,10 @@ export default function DashboardPage() {
   const { data: orders } = useQuery({
     queryKey: ['orders'],
     queryFn: () => client.get('/orders').then((r) => r.data),
+  })
+  const { data: companies } = useQuery({
+    queryKey: ['companies'],
+    queryFn: () => client.get('/companies').then((r) => r.data),
   })
 
   const dealCount = alerts?.deals?.length || 0
@@ -104,24 +179,45 @@ export default function DashboardPage() {
             <span className="text-xs text-[#8b949e] font-normal">
               {new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
             </span>
+            {(alerts?.deals?.length > 0) && (
+              <span className="ml-auto text-xs text-green-400 bg-green-400/10 px-2 py-0.5 rounded-full">
+                {alerts.deals.length} deals — tap + to add
+              </span>
+            )}
           </h2>
           {alertsLoading ? <div className="flex justify-center py-8"><LoadingSpinner /></div> : <PriceAlertFeed alerts={alerts} />}
         </div>
 
-        <div className="glass-card p-4">
-          <h2 className="text-[#e6edf3] font-semibold mb-3">Low Stock</h2>
-          {!lowStock?.length ? (
-            <p className="text-[#8b949e] text-sm">All stock levels OK.</p>
-          ) : (
-            <div className="space-y-2">
-              {lowStock.map((p) => (
-                <div key={p.id} className="flex items-center justify-between text-sm">
-                  <span className="text-[#e6edf3] truncate mr-2">{p.name}</span>
-                  <span className="text-red-400 font-mono text-xs shrink-0">{p.current_stock}/{p.reorder_level}</span>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="space-y-4">
+          <TodaysDeliveries companies={companies} />
+
+          <div className="glass-card p-4">
+            <h2 className="text-[#e6edf3] font-semibold mb-3 flex items-center gap-2">
+              Low Stock
+              {lowStock?.length > 0 && (
+                <span className="text-xs text-red-400 bg-red-400/10 px-2 py-0.5 rounded-full ml-auto">
+                  {lowStock.length} items
+                </span>
+              )}
+            </h2>
+            {!lowStock?.length ? (
+              <p className="text-[#8b949e] text-sm">All stock levels OK.</p>
+            ) : (
+              <div className="space-y-2">
+                {lowStock.slice(0, 8).map((p) => (
+                  <div key={p.id} className="flex items-center justify-between text-sm">
+                    <span className="text-[#e6edf3] truncate mr-2">{p.name}</span>
+                    <span className="text-red-400 font-mono text-xs shrink-0">{p.current_stock}/{p.reorder_level}</span>
+                  </div>
+                ))}
+                {lowStock.length > 8 && (
+                  <button onClick={() => navigate('/inventory')} className="text-xs text-[#58a6ff] hover:underline mt-1">
+                    View all {lowStock.length} →
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

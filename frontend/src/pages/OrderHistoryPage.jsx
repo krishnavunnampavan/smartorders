@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { Link2, Download, CheckCircle, Clock } from 'lucide-react'
+import { Link2, Download, CheckCircle, Clock, RotateCcw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Layout from '../components/layout/Layout'
 import PriceTagBadge from '../components/shared/PriceTagBadge'
 import LoadingSpinner from '../components/shared/LoadingSpinner'
 import client from '../api/client'
 import { formatCurrency } from '../utils/formatters'
+import { useOrderStore } from '../store/orderStore'
 
 function SplitCard({ split, orderId }) {
   const [linkInfo, setLinkInfo] = useState(null)
@@ -107,8 +108,8 @@ function OrderDetail({ orderId }) {
           <div className="space-y-2 max-h-80 overflow-y-auto">
             {items?.map((item) => (
               <div key={item.id} className="flex items-center justify-between text-sm p-2 rounded bg-[rgba(48,54,61,0.3)]">
-                <span className="text-[#e6edf3] flex-1 truncate">{item.product_id?.slice(0, 8)}…</span>
-                <div className="flex items-center gap-2 ml-2">
+                <span className="text-[#e6edf3] flex-1 truncate">{item.product_name || item.product_id?.slice(0, 8)}</span>
+                <div className="flex items-center gap-2 ml-2 shrink-0">
                   {item.price_status && <PriceTagBadge status={item.price_status} />}
                   <span className="text-[#8b949e] text-xs">×{item.quantity}</span>
                   <span className="text-[#e6edf3] font-mono text-xs">{formatCurrency(item.line_total)}</span>
@@ -142,6 +143,47 @@ function OrderDetail({ orderId }) {
   )
 }
 
+function ReorderButton({ orderId }) {
+  const { addResolvedItem } = useOrderStore()
+  const [loading, setLoading] = useState(false)
+
+  const handleReorder = async (e) => {
+    e.stopPropagation()
+    setLoading(true)
+    try {
+      const { data: items } = await client.get(`/orders/${orderId}/items`)
+      if (!items?.length) { toast.error('No items in this order'); return }
+      items.forEach((item) =>
+        addResolvedItem({
+          product_id: item.product_id,
+          product_name: item.product_name,
+          company_id: item.company_id,
+          quantity: item.quantity,
+          unit_price: item.unit_price || 0,
+          price_status: item.price_status,
+          source: 'reorder',
+        })
+      )
+      toast.success(`${items.length} items added to cart`)
+    } catch {
+      toast.error('Failed to load order items')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <button
+      onClick={handleReorder}
+      disabled={loading}
+      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[#58a6ff]/15 text-[#58a6ff] hover:bg-[#58a6ff]/25 transition-colors disabled:opacity-50 shrink-0"
+    >
+      <RotateCcw size={12} className={loading ? 'animate-spin' : ''} />
+      {loading ? 'Loading…' : 'Reorder'}
+    </button>
+  )
+}
+
 export default function OrderHistoryPage() {
   const [searchParams] = useSearchParams()
   const reviewId = searchParams.get('review')
@@ -162,14 +204,15 @@ export default function OrderHistoryPage() {
               className="w-full flex items-center justify-between p-5 text-left"
               onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}
             >
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-[#e6edf3] font-medium">{order.order_month}</p>
                 <p className="text-[#8b949e] text-xs mt-0.5">
                   {order.total_items ?? '?'} items · {formatCurrency(order.total_value)}
                 </p>
               </div>
-              <div className="flex items-center gap-3">
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
+              <div className="flex items-center gap-2 ml-3">
+                <ReorderButton orderId={order.id} />
+                <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${
                   order.status === 'draft' ? 'bg-gray-700 text-gray-300' :
                   order.status === 'sent' ? 'bg-blue-900/50 text-blue-400' :
                   'bg-green-900/50 text-green-400'
