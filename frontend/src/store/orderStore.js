@@ -6,15 +6,33 @@ import cartAPI from '../api/cart'
 const SIZE_MULTIPLIERS = {
   '50ml':  0.10, '100ml': 0.18, '200ml': 0.30,
   '375ml': 0.52, '500ml': 0.70, '750ml': 1.00,
-  '1L':    1.28, '1.75L': 1.95,
+  '1L':    1.28, '1.5L':  1.70, '1.75L': 1.95,
 }
+
+export const STANDARD_SIZES = ['50ml', '100ml', '200ml', '375ml', '500ml', '750ml', '1L', '1.5L', '1.75L']
+
+export const DEFAULT_UNIT_OPTIONS = [
+  { unit_label: 'Single',  bottles_per_unit: 1  },
+  { unit_label: '3 Pack',  bottles_per_unit: 3  },
+  { unit_label: '4 Pack',  bottles_per_unit: 4  },
+  { unit_label: '6 Pack',  bottles_per_unit: 6  },
+  { unit_label: '12 Pack', bottles_per_unit: 12 },
+  { unit_label: '24 Pack', bottles_per_unit: 24 },
+  { unit_label: '30 Pack', bottles_per_unit: 30 },
+]
+
+const PACK_MAP = { 'Single': 1, '3 Pack': 3, '4 Pack': 4, '6 Pack': 6, '12 Pack': 12, '24 Pack': 24, '30 Pack': 30 }
 
 export function calcUnitPrice(baseUnitPrice, sizeLabel, unit, casePackSize = 12) {
   if (!baseUnitPrice) return null
   const mult = SIZE_MULTIPLIERS[sizeLabel] ?? 1.0
   const sizePrice = baseUnitPrice * mult
   const half = Math.max(1, Math.floor(casePackSize / 2))
-  const bottlesMap = { 'Bottle': 1, 'Half Case': half, 'Case': casePackSize, 'Mixed Case': casePackSize }
+  const bottlesMap = {
+    ...PACK_MAP,
+    // legacy compat
+    'Bottle': 1, 'Half Case': half, 'Case': casePackSize, 'Mixed Case': casePackSize,
+  }
   const bpu = bottlesMap[unit] ?? 1
   return { unitPrice: +(sizePrice * bpu).toFixed(2), bottlesPerUnit: bpu }
 }

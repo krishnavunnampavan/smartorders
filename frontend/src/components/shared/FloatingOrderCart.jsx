@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { useOrderStore } from '../../store/orderStore'
+import { useOrderStore, STANDARD_SIZES, DEFAULT_UNIT_OPTIONS } from '../../store/orderStore'
 import PriceTagBadge from './PriceTagBadge'
 import { formatCurrency } from '../../utils/formatters'
 
@@ -51,11 +51,11 @@ function CartItem({ item }) {
 
   const sizeLabels = item.size_options?.length
     ? item.size_options.map((s) => s.size_label)
-    : ['50ml', '100ml', '200ml', '375ml', '500ml', '750ml', '1L', '1.75L']
+    : STANDARD_SIZES
 
   const unitLabels = item.unit_options?.length
     ? item.unit_options.map((u) => u.unit_label)
-    : ['Bottle', 'Half Case', 'Case', 'Mixed Case']
+    : DEFAULT_UNIT_OPTIONS.map((u) => u.unit_label)
 
   // Server provides line_total; fall back to local calculation
   const lineTotal = item.line_total != null
@@ -285,11 +285,8 @@ export default function FloatingOrderCart() {
     try {
       const result = await submitCart()
       if (!result) throw new Error('Submit failed')
-      const orderId = result.order_id
-      setCreatedOrderId(orderId)
-      navigate(`/orders?review=${orderId}`)
-      toast.success('Order created!')
-      window.open(`/api/orders/${orderId}/pdf/master`, '_blank')
+      setCreatedOrderId(result.order_id)
+      toast.success('Order created! Click "Master PDF" to download.')
     } catch {
       toast.error('Failed to create order')
     } finally {
@@ -297,7 +294,12 @@ export default function FloatingOrderCart() {
     }
   }
 
-  const handleClose = () => { setOpen(false); setConfirming(false); setCreatedOrderId(null) }
+  const handleClose = () => {
+    if (createdOrderId) navigate(`/orders?review=${createdOrderId}`)
+    setOpen(false)
+    setConfirming(false)
+    setCreatedOrderId(null)
+  }
 
   return (
     <>

@@ -11,6 +11,7 @@ STANDARD_SIZES = [
     (500,  "500ml",  Decimal("0.70")),
     (750,  "750ml",  Decimal("1.00")),
     (1000, "1L",     Decimal("1.28")),
+    (1500, "1.5L",   Decimal("1.70")),
     (1750, "1.75L",  Decimal("1.95")),
 ]
 
@@ -59,27 +60,22 @@ def get_size_options(product) -> list[dict]:
     return options
 
 
+PACK_OPTIONS = [
+    {"unit_label": "Single",   "bottles_per_unit": 1,  "is_default": False},
+    {"unit_label": "3 Pack",   "bottles_per_unit": 3,  "is_default": False},
+    {"unit_label": "4 Pack",   "bottles_per_unit": 4,  "is_default": False},
+    {"unit_label": "6 Pack",   "bottles_per_unit": 6,  "is_default": False},
+    {"unit_label": "12 Pack",  "bottles_per_unit": 12, "is_default": True},
+    {"unit_label": "24 Pack",  "bottles_per_unit": 24, "is_default": False},
+    {"unit_label": "30 Pack",  "bottles_per_unit": 30, "is_default": False},
+]
+
+_PACK_MAP = {p["unit_label"]: p["bottles_per_unit"] for p in PACK_OPTIONS}
+
+
 def get_unit_options(product, selected_size_ml: int = 750) -> list[dict]:
-    """
-    Returns list of {unit_label, bottles_per_unit, is_default}.
-    Units: Bottle | Half Case | Case | Mixed Case
-    case_pack comes from product.case_pack or defaults to 12.
-    """
-    try:
-        pack_str = str(product.pack or "").strip()
-        # pack can be "12" or "12/750ml" or "6/1.75L" — take first number
-        case_pack = int(pack_str.split("/")[0]) if pack_str else 12
-    except (ValueError, AttributeError):
-        case_pack = 12
-
-    half = max(1, case_pack // 2)
-
-    return [
-        {"unit_label": "Bottle",     "bottles_per_unit": 1,         "is_default": False},
-        {"unit_label": "Half Case",  "bottles_per_unit": half,       "is_default": False},
-        {"unit_label": "Case",       "bottles_per_unit": case_pack,  "is_default": True},
-        {"unit_label": "Mixed Case", "bottles_per_unit": case_pack,  "is_default": False},
-    ]
+    """Returns the standard pack options list."""
+    return list(PACK_OPTIONS)  # return a copy
 
 
 def calculate_effective_price(
@@ -93,12 +89,18 @@ def calculate_effective_price(
     Returns {unit_price, bottles_per_unit, total_bottles, line_total}.
     unit_price = price for the selected size × bottles_per_unit.
     """
-    # Even when no price, still compute bottle counts correctly
+    # Determine bottles_per_unit from label (new pack labels + legacy compat)
     half = max(1, case_pack // 2)
-    unit_map_early = {
-        "Bottle": 1, "Half Case": half, "Case": case_pack, "Mixed Case": case_pack,
+    unit_map = {
+        **_PACK_MAP,
+        # Legacy labels kept for backward compat
+        "Bottle":     1,
+        "Half Case":  half,
+        "Case":       case_pack,
+        "Mixed Case": case_pack,
     }
-    bpu_early = unit_map_early.get(unit_label, 1)
+    bpu_early = unit_map.get(unit_label, 1)
+
     if base_unit_price is None:
         return {"unit_price": None, "bottles_per_unit": bpu_early, "total_bottles": quantity * bpu_early, "line_total": None}
 
@@ -108,15 +110,7 @@ def calculate_effective_price(
     _, mult = _SIZE_BY_LABEL.get(size_label, (750, Decimal("1.00")))
     size_price = (base * mult).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-    # bottles per unit
-    half = max(1, case_pack // 2)
-    unit_map = {
-        "Bottle": 1,
-        "Half Case": half,
-        "Case": case_pack,
-        "Mixed Case": case_pack,
-    }
-    bottles_per_unit = unit_map.get(unit_label, 1)
+    bottles_per_unit = bpu_early
 
     unit_price   = size_price * bottles_per_unit
     total_bottles = bottles_per_unit * quantity

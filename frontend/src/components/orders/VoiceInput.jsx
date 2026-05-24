@@ -3,11 +3,10 @@ import { Mic, MicOff, Loader, Plus, X, AlertTriangle, CheckCircle, Search, Rotat
 import toast from 'react-hot-toast'
 import { useVoiceRecorder } from '../../hooks/useVoiceRecorder'
 import client from '../../api/client'
-import { useOrderStore, calcUnitPrice } from '../../store/orderStore'
+import { useOrderStore, calcUnitPrice, STANDARD_SIZES, DEFAULT_UNIT_OPTIONS } from '../../store/orderStore'
 import { useDebounce } from '../../hooks/useDebounce'
 
-const STANDARD_SIZES = ['50ml', '100ml', '200ml', '375ml', '500ml', '750ml', '1L', '1.75L']
-const UNIT_LABELS = ['Bottle', 'Half Case', 'Case', 'Mixed Case']
+const UNIT_LABELS = DEFAULT_UNIT_OPTIONS.map((u) => u.unit_label)
 
 // ── Inline search for unmatched items ────────────────────────────────────
 function UnmatchedItem({ item, onPromote, onDismiss }) {
@@ -43,14 +42,9 @@ function UnmatchedItem({ item, onPromote, onDismiss }) {
       source: 'voice',
       pack: product.pack,
       size_options: product.size_options || STANDARD_SIZES.map((s) => ({ size_label: s, unit_price: null, is_default: s === '750ml' })),
-      unit_options: product.unit_options || [
-        { unit_label: 'Bottle', bottles_per_unit: 1 },
-        { unit_label: 'Half Case', bottles_per_unit: 6 },
-        { unit_label: 'Case', bottles_per_unit: 12, is_default: true },
-        { unit_label: 'Mixed Case', bottles_per_unit: 12 },
-      ],
+      unit_options: product.unit_options || DEFAULT_UNIT_OPTIONS,
       selected_size: '750ml',
-      selected_unit: 'Case',
+      selected_unit: '12 Pack',
       bottles_per_unit: 12,
     })
     setShowResults(false)
@@ -128,17 +122,10 @@ function MatchedItemCard({ item, onRemove, onUpdate }) {
     ? item.size_options
     : STANDARD_SIZES.map((s) => ({ size_label: s, unit_price: null, is_default: s === '750ml' }))
 
-  const unitOpts = item.unit_options?.length
-    ? item.unit_options
-    : [
-        { unit_label: 'Bottle',     bottles_per_unit: 1 },
-        { unit_label: 'Half Case',  bottles_per_unit: 6 },
-        { unit_label: 'Case',       bottles_per_unit: 12 },
-        { unit_label: 'Mixed Case', bottles_per_unit: 12 },
-      ]
+  const unitOpts = item.unit_options?.length ? item.unit_options : DEFAULT_UNIT_OPTIONS
 
   const selSize = item.selected_size || '750ml'
-  const selUnit = item.selected_unit || 'Case'
+  const selUnit = item.selected_unit || '12 Pack'
 
   const currentSizeOpt = sizeOpts.find((s) => s.size_label === selSize) || sizeOpts[0]
   const currentUnitOpt = unitOpts.find((u) => u.unit_label === selUnit) || unitOpts[0]

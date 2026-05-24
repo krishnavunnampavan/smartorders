@@ -3,11 +3,9 @@ import { useDropzone } from 'react-dropzone'
 import { Camera, Trash2, ChevronDown, CheckCircle, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import client from '../../api/client'
-import { useOrderStore } from '../../store/orderStore'
+import { useOrderStore, STANDARD_SIZES, DEFAULT_UNIT_OPTIONS } from '../../store/orderStore'
 import LoadingSpinner from '../shared/LoadingSpinner'
 import PriceTagBadge from '../shared/PriceTagBadge'
-
-const STANDARD_SIZES = ['50ml', '100ml', '200ml', '375ml', '500ml', '750ml', '1L', '1.75L']
 
 function SizeSelect({ value, options, onChange }) {
   const labels = options?.length ? options.map((o) => o.size_label) : STANDARD_SIZES
@@ -26,14 +24,7 @@ function SizeSelect({ value, options, onChange }) {
 }
 
 function UnitSelect({ value, options, onChange }) {
-  const opts = options?.length
-    ? options
-    : [
-        { unit_label: 'Bottle',     bottles_per_unit: 1 },
-        { unit_label: 'Half Case',  bottles_per_unit: 6 },
-        { unit_label: 'Case',       bottles_per_unit: 12 },
-        { unit_label: 'Mixed Case', bottles_per_unit: 12 },
-      ]
+  const opts = options?.length ? options : DEFAULT_UNIT_OPTIONS
   return (
     <div className="relative">
       <select
@@ -78,7 +69,7 @@ export default function PhotoInput() {
       const resolved = (data.resolved || []).map((r) => ({
         ...r,
         selected_size: r.selected_size || '750ml',
-        selected_unit: r.selected_unit || 'Case',
+        selected_unit: r.selected_unit || '12 Pack',
         bottles_per_unit: r.bottles_per_unit || 12,
       }))
       setRows(resolved)

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Search, X, ChevronDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import client from '../../api/client'
-import { useOrderStore, calcUnitPrice } from '../../store/orderStore'
+import { useOrderStore, calcUnitPrice, STANDARD_SIZES, DEFAULT_UNIT_OPTIONS } from '../../store/orderStore'
 import { useDebounce } from '../../hooks/useDebounce'
 import PriceTagBadge from '../shared/PriceTagBadge'
 
@@ -12,14 +12,6 @@ const CATEGORIES = [
   'Beer & RTD', 'Wine', 'Vodka', 'Whiskey & Cognac',
   'Tequila & Mezcal', 'Rum', 'Gin', 'Liqueurs & Cordials',
   'Non-Alcoholic', 'Tobacco', 'Spirits & Other',
-]
-
-const STANDARD_SIZES = ['50ml', '100ml', '200ml', '375ml', '500ml', '750ml', '1L', '1.75L']
-const DEFAULT_UNIT_OPTS = [
-  { unit_label: 'Bottle',     bottles_per_unit: 1 },
-  { unit_label: 'Half Case',  bottles_per_unit: 6 },
-  { unit_label: 'Case',       bottles_per_unit: 12 },
-  { unit_label: 'Mixed Case', bottles_per_unit: 12 },
 ]
 
 function SelectBox({ value, options, onChange, className = '' }) {
@@ -62,15 +54,13 @@ export default function ManualEntry() {
     keepPreviousData: true,
   })
 
-  const getLocal = (pid, p) => {
+  const getLocal = (pid) => {
     const s = localState[pid]
-    const casePack = parseCasePack(p?.pack)
-    const defaultUnit = { unit_label: 'Case', bottles_per_unit: casePack }
     return {
       qty: s?.qty ?? 1,
       size: s?.size ?? '750ml',
-      unit: s?.unit ?? 'Case',
-      unitOpt: s?.unitOpt ?? defaultUnit,
+      unit: s?.unit ?? '12 Pack',
+      unitOpt: s?.unitOpt ?? DEFAULT_UNIT_OPTIONS.find((u) => u.unit_label === '12 Pack'),
     }
   }
 
@@ -91,16 +81,7 @@ export default function ManualEntry() {
     return STANDARD_SIZES
   }
 
-  const getUnitOptions = (p) => {
-    if (p.unit_options?.length) return p.unit_options
-    const casePack = parseCasePack(p.pack)
-    return [
-      { unit_label: 'Bottle',     bottles_per_unit: 1 },
-      { unit_label: 'Half Case',  bottles_per_unit: Math.max(1, Math.floor(casePack / 2)) },
-      { unit_label: 'Case',       bottles_per_unit: casePack },
-      { unit_label: 'Mixed Case', bottles_per_unit: casePack },
-    ]
-  }
+  const getUnitOptions = (p) => p.unit_options?.length ? p.unit_options : DEFAULT_UNIT_OPTIONS
 
   const getEffectivePrice = (p, sizeLabel, unitLabel) => {
     const casePack = parseCasePack(p.pack)
@@ -109,7 +90,7 @@ export default function ManualEntry() {
   }
 
   const addToOrder = (p) => {
-    const { qty, size, unit } = getLocal(p.id, p)
+    const { qty, size, unit } = getLocal(p.id)
     const unitOpts = getUnitOptions(p)
     const sizeOpts = getSizeOptions(p).map((sl) => {
       const found = (p.size_options || []).find((s) => (s.size_label ?? s) === sl)
@@ -122,7 +103,7 @@ export default function ManualEntry() {
       { ...p, product_id: p.id, product_name: p.name, source: 'manual' },
       sizeOpt, unitOpt, qty
     )
-    setLocalState((prev) => ({ ...prev, [p.id]: { qty: 1, size: '750ml', unit: 'Case' } }))
+    setLocalState((prev) => ({ ...prev, [p.id]: { qty: 1, size: '750ml', unit: '12 Pack' } }))
     toast.success(`Added ${p.name}`, { duration: 1200 })
   }
 
@@ -189,7 +170,7 @@ export default function ManualEntry() {
 
         {products?.map((p) => {
           const ordered = inOrder(p.id)
-          const { qty, size, unit } = getLocal(p.id, p)
+          const { qty, size, unit } = getLocal(p.id)
           const sizeOptions = getSizeOptions(p)
           const unitOptions = getUnitOptions(p)
           const effectivePrice = getEffectivePrice(p, size, unit)
