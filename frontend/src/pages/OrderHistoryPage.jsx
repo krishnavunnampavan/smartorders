@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { Link2, Download, CheckCircle, Clock, RotateCcw } from 'lucide-react'
+import { Link2, Download, CheckCircle, Clock, RotateCcw, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Layout from '../components/layout/Layout'
 import PriceTagBadge from '../components/shared/PriceTagBadge'
@@ -24,8 +24,12 @@ function SplitCard({ split, orderId }) {
     window.open(`/api/share/pdf/${linkInfo?.token}`, '_blank')
   }
 
+  const belowMin = split.company_min_order && split.subtotal < split.company_min_order
+
   return (
-    <div className="p-4 rounded-lg border border-[rgba(48,54,61,0.8)] bg-[rgba(22,27,34,0.4)]">
+    <div className={`p-4 rounded-lg border bg-[rgba(22,27,34,0.4)] ${
+      belowMin ? 'border-yellow-600/50' : 'border-[rgba(48,54,61,0.8)]'
+    }`}>
       <div className="flex items-start justify-between">
         <div>
           <p className="text-[#e6edf3] font-medium">{split.company_name || 'Company'}</p>
@@ -43,6 +47,18 @@ function SplitCard({ split, orderId }) {
           {split.status}
         </span>
       </div>
+
+      {/* Min order warning */}
+      {belowMin && (
+        <div className="flex items-center gap-1.5 mt-2 px-2.5 py-1.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+          <AlertTriangle size={12} className="text-yellow-400 shrink-0" />
+          <p className="text-yellow-400 text-xs">
+            Below minimum order of {formatCurrency(split.company_min_order)} —
+            {' '}short by {formatCurrency(split.company_min_order - split.subtotal)}
+          </p>
+        </div>
+      )}
+
       <div className="flex gap-2 mt-3">
         <button className="btn-secondary text-xs py-1.5 flex items-center gap-1.5" onClick={generateLink}>
           <Link2 size={13} /> Generate Link

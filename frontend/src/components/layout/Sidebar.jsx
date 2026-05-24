@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, ShoppingCart, History,
-  BookOpen, Building2, Settings, Package, List, Download,
+  BookOpen, Building2, Settings, Package, List, Download, BarChart2,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -15,6 +15,7 @@ const nav = [
   { to: '/catalog', label: 'Catalog Upload', icon: BookOpen },
   { to: '/orders', label: 'Order History', icon: History },
   { to: '/inventory', label: 'Inventory', icon: Package },
+  { to: '/analytics', label: 'Analytics', icon: BarChart2 },
   { divider: true },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]

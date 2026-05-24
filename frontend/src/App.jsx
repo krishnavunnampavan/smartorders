@@ -8,6 +8,7 @@ import SettingsPage from './pages/SettingsPage'
 import PublicOrderPage from './pages/PublicOrderPage'
 import InventoryPage from './pages/InventoryPage'
 import ProductsPage from './pages/ProductsPage'
+import AnalyticsPage from './pages/AnalyticsPage'
 import FloatingOrderCart from './components/shared/FloatingOrderCart'
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="/catalog" element={<CatalogPage />} />
         <Route path="/companies" element={<CompaniesPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
+        <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>
 

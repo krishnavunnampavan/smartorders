@@ -152,7 +152,24 @@ def split_order(order_id: UUID, db: Session = Depends(get_db)):
     return {"splits": splits}
 
 
-@router.get("/{order_id}/splits", response_model=list[OrderSplitOut])
+@router.get("/{order_id}/splits")
 def get_splits(order_id: UUID, db: Session = Depends(get_db)):
     from app.models import OrderSplit
-    return db.query(OrderSplit).filter_by(order_id=order_id).all()
+    from app.models.company import Company
+    splits = db.query(OrderSplit).filter_by(order_id=order_id).all()
+    result = []
+    for s in splits:
+        company = db.get(Company, s.company_id) if s.company_id else None
+        result.append({
+            "id": str(s.id),
+            "order_id": str(s.order_id),
+            "company_id": str(s.company_id) if s.company_id else None,
+            "company_name": company.name if company else None,
+            "company_min_order": float(company.min_order_value) if company and company.min_order_value else None,
+            "item_count": s.item_count,
+            "subtotal": float(s.subtotal) if s.subtotal else 0,
+            "status": s.status,
+            "sent_at": s.sent_at.isoformat() if s.sent_at else None,
+            "confirmed_at": s.confirmed_at.isoformat() if s.confirmed_at else None,
+        })
+    return result

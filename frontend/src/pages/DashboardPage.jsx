@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { TrendingDown, TrendingUp, ShoppingCart, AlertTriangle, Plus, Upload, Truck, Phone } from 'lucide-react'
+import { TrendingDown, TrendingUp, ShoppingCart, AlertTriangle, Plus, Upload, Truck, Phone, Zap, BarChart2 } from 'lucide-react'
 import Layout from '../components/layout/Layout'
 import PriceTagBadge from '../components/shared/PriceTagBadge'
 import LoadingSpinner from '../components/shared/LoadingSpinner'
+import SmartOrderModal from '../components/shared/SmartOrderModal'
 import client from '../api/client'
 import { formatCurrency, thisMonth } from '../utils/formatters'
 import { useOrderStore } from '../store/orderStore'
@@ -122,6 +124,7 @@ function PriceAlertFeed({ alerts }) {
 
 export default function DashboardPage() {
   const navigate = useNavigate()
+  const [showSmartOrder, setShowSmartOrder] = useState(false)
   const month = thisMonth()
 
   const { data: alerts, isLoading: alertsLoading } = useQuery({
@@ -147,10 +150,21 @@ export default function DashboardPage() {
 
   return (
     <Layout title="Dashboard">
+      {showSmartOrder && <SmartOrderModal onClose={() => setShowSmartOrder(false)} />}
+
       {/* Quick actions — horizontal scroll on mobile */}
       <div className="flex gap-2 mb-5 overflow-x-auto pb-1 -mx-1 px-1">
         <button className="btn-primary flex items-center gap-2 whitespace-nowrap shrink-0" onClick={() => navigate('/orders/new')}>
           <ShoppingCart size={15} /> New Order
+        </button>
+        <button
+          onClick={() => setShowSmartOrder(true)}
+          className="flex items-center gap-2 whitespace-nowrap shrink-0 px-4 py-2 rounded-lg text-sm font-medium bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25 border border-yellow-500/30 transition-colors"
+        >
+          <Zap size={15} /> Smart Order
+        </button>
+        <button className="btn-secondary flex items-center gap-2 whitespace-nowrap shrink-0" onClick={() => navigate('/analytics')}>
+          <BarChart2 size={15} /> Analytics
         </button>
         <button className="btn-secondary flex items-center gap-2 whitespace-nowrap shrink-0" onClick={() => navigate('/catalog')}>
           <Upload size={15} /> Upload Catalog
