@@ -51,11 +51,31 @@ def process_catalog_prices(
         "upload_month": str(upload_month),
     }
 
+    from uuid import UUID as _UUID
+    try:
+        company_uuid = _UUID(str(company_id))
+    except (ValueError, AttributeError):
+        company_uuid = None
+
     for item in parsed_items:
         product = match_product(db, item.get("name", ""), company_id)
-        if not product:
-            results["new_items"].append(item)
-            continue
+
+        # Auto-create product if not found
+        if not product and item.get("name"):
+            product = Product(
+                name=item["name"].strip(),
+                sku=item.get("sku"),
+                unit_size=item.get("unit_size"),
+                unit_price=item.get("unit_price") or 0,
+                case_price=item.get("case_price"),
+                company_id=company_uuid,
+                category=item.get("category"),
+                aliases=[item["name"].lower()],
+                is_active=True,
+            )
+            db.add(product)
+            db.flush()  # get the ID without committing
+            results["new_items"].append({"name": item["name"], "created": True})
 
         last_row = (
             db.query(PriceHistory)

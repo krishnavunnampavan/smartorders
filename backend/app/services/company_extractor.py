@@ -1,21 +1,68 @@
 """
-Extract company information from uploaded catalog files using AI.
-Auto-creates or matches an existing company record.
+Extract company information from uploaded catalog files.
+Uses filename patterns, text heuristics, and AI as fallback.
 """
 from __future__ import annotations
 import re
 from sqlalchemy.orm import Session
 from app.models import Company
 
+# Known distributor name patterns (filename keyword → canonical name)
+_KNOWN_DISTRIBUTORS: list[tuple[str, str]] = [
+    ("brescome", "BRESCOME BARTON"),
+    ("barton",   "BRESCOME BARTON"),
+    ("bb buy",   "BRESCOME BARTON"),
+    ("bb_buy",   "BRESCOME BARTON"),
+    ("martignetti", "MARTIGNETTI"),
+    ("eder",     "EDER-GOODMAN"),
+    ("goodman",  "EDER-GOODMAN"),
+    ("cdi",      "CDI"),
+    ("colonial", "CDI"),
+    ("rhode island",  "BRESCOME BARTON"),
+]
 
-async def extract_company_from_text(raw_text: str, ai_service=None) -> dict:
+
+def _detect_from_filename(filename: str) -> str | None:
+    lower = filename.lower()
+    for keyword, name in _KNOWN_DISTRIBUTORS:
+        if keyword in lower:
+            return name
+    return None
+
+
+def _detect_from_text_header(raw_text: str) -> str | None:
+    """Look for known distributor names in first 500 chars of PDF text."""
+    snippet = raw_text[:500].lower()
+    for keyword, name in _KNOWN_DISTRIBUTORS:
+        if keyword in snippet:
+            return name
+    return None
+
+
+async def extract_company_from_text(
+    raw_text: str,
+    ai_service=None,
+    filename: str = "",
+) -> dict:
     """
     Extract company name, phone, email, address from catalog header text.
     Uses AI if available, regex fallback otherwise.
     """
     info = {"name": None, "phone": None, "email": None, "address": None, "contact_name": None}
 
-    # Always try regex first (fast, no API cost)
+    # 1. Try filename pattern (fastest, free)
+    if filename:
+        detected = _detect_from_filename(filename)
+        if detected:
+            info["name"] = detected
+
+    # 2. Try text header patterns (free)
+    if not info["name"] and raw_text:
+        detected = _detect_from_text_header(raw_text)
+        if detected:
+            info["name"] = detected
+
+    # Always try regex for contact info (fast, no API cost)
     phone_m = re.search(r"\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}", raw_text)
     if phone_m:
         info["phone"] = phone_m.group()
@@ -24,8 +71,8 @@ async def extract_company_from_text(raw_text: str, ai_service=None) -> dict:
     if email_m:
         info["email"] = email_m.group()
 
-    # Try AI for better extraction if available
-    if ai_service:
+    # 3. Try AI for better extraction if available and name still unknown
+    if ai_service and not info["name"]:
         try:
             # Send only first 2000 chars (header area of catalog)
             snippet = raw_text[:2000]

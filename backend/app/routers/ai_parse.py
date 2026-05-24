@@ -11,6 +11,7 @@ from app.services.learning_service import (
     get_context_hints, get_stats,
 )
 from app.utils.fuzzy_match import match_product
+from app.utils.size_prices import get_size_options, get_unit_options
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -126,6 +127,10 @@ def _resolve_products(parsed: list[dict], db: Session, source: str, transcript: 
         name = item.get("name", "")
         product = match_product(db, name)
         if product:
+            size_options = get_size_options(product)
+            unit_options = get_unit_options(product)
+            default_size = next((s for s in size_options if s["is_default"]), size_options[0])
+            default_unit = next((u for u in unit_options if u["is_default"]), unit_options[0])
             resolved.append({
                 "product_id": str(product.id),
                 "product_name": product.name,
@@ -134,6 +139,13 @@ def _resolve_products(parsed: list[dict], db: Session, source: str, transcript: 
                 "unit": item.get("unit", "cases"),
                 "matched_from": name,
                 "source": source,
+                "unit_price": float(product.unit_price) if product.unit_price else None,
+                "price_status": getattr(product, "price_status", None),
+                "size_options": size_options,
+                "unit_options": unit_options,
+                "selected_size": default_size["size_label"],
+                "selected_unit": default_unit["unit_label"],
+                "bottles_per_unit": default_unit["bottles_per_unit"],
             })
         else:
             unmatched.append({"name": name, "qty": item.get("qty", 1)})

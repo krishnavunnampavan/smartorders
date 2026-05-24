@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react'
-import { Mic, MicOff, Loader, Plus, X, AlertTriangle, CheckCircle, Search, RotateCcw } from 'lucide-react'
+import { Mic, MicOff, Loader, Plus, X, AlertTriangle, CheckCircle, Search, RotateCcw, ChevronDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useVoiceRecorder } from '../../hooks/useVoiceRecorder'
 import client from '../../api/client'
-import { useOrderStore } from '../../store/orderStore'
+import { useOrderStore, calcUnitPrice } from '../../store/orderStore'
 import { useDebounce } from '../../hooks/useDebounce'
 
-// ── Inline search widget for a single unmatched item ─────────────────────
+const STANDARD_SIZES = ['50ml', '100ml', '200ml', '375ml', '500ml', '750ml', '1L', '1.75L']
+const UNIT_LABELS = ['Bottle', 'Half Case', 'Case', 'Mixed Case']
+
+// ── Inline search for unmatched items ────────────────────────────────────
 function UnmatchedItem({ item, onPromote, onDismiss }) {
   const [query, setQuery] = useState(item.name)
   const [results, setResults] = useState([])
@@ -25,7 +28,6 @@ function UnmatchedItem({ item, onPromote, onDismiss }) {
     finally { setSearching(false) }
   }
 
-  // auto-search when debounced query changes
   useEffect(() => { doSearch(debouncedQ) }, [debouncedQ])
 
   const pick = (product) => {
@@ -35,8 +37,21 @@ function UnmatchedItem({ item, onPromote, onDismiss }) {
       company_id: product.company_id || null,
       quantity: item.qty,
       unit_price: product.unit_price || 0,
+      base_unit_price: product.unit_price || 0,
+      price_status: product.price_status,
       matched_from: item.name,
       source: 'voice',
+      pack: product.pack,
+      size_options: product.size_options || STANDARD_SIZES.map((s) => ({ size_label: s, unit_price: null, is_default: s === '750ml' })),
+      unit_options: product.unit_options || [
+        { unit_label: 'Bottle', bottles_per_unit: 1 },
+        { unit_label: 'Half Case', bottles_per_unit: 6 },
+        { unit_label: 'Case', bottles_per_unit: 12, is_default: true },
+        { unit_label: 'Mixed Case', bottles_per_unit: 12 },
+      ],
+      selected_size: '750ml',
+      selected_unit: 'Case',
+      bottles_per_unit: 12,
     })
     setShowResults(false)
   }
@@ -60,36 +75,143 @@ function UnmatchedItem({ item, onPromote, onDismiss }) {
         />
         {searching && <Loader size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8b949e] animate-spin" />}
       </div>
-
       {showResults && results.length > 0 && (
         <div className="absolute left-0 right-0 top-full mt-1 z-20 bg-[#161b22] border border-[rgba(48,54,61,0.8)] rounded-lg shadow-xl overflow-hidden max-h-44 overflow-y-auto">
           {results.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => pick(p)}
-              className="w-full text-left px-3 py-2 hover:bg-[rgba(48,54,61,0.6)] transition-colors border-b border-[rgba(48,54,61,0.3)] last:border-0"
-            >
+            <button key={p.id} onClick={() => pick(p)}
+              className="w-full text-left px-3 py-2 hover:bg-[rgba(48,54,61,0.6)] transition-colors border-b border-[rgba(48,54,61,0.3)] last:border-0">
               <p className="text-[#e6edf3] text-xs font-medium truncate">{p.name}</p>
               {p.unit_size && <p className="text-[#8b949e] text-[10px]">{p.unit_size} · {p.category || ''}</p>}
             </button>
           ))}
         </div>
       )}
-      {showResults && results.length === 0 && !searching && query.length >= 2 && (
-        <p className="text-[#8b949e] text-[10px] mt-1.5 pl-1">No products found — try a shorter keyword</p>
-      )}
     </div>
   )
 }
 
-// ── Main VoiceInput component ─────────────────────────────────────────────
+// ── Size pill button ──────────────────────────────────────────────────────
+function SizeBtn({ label, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-2 py-1 rounded-md text-[10px] font-semibold transition-colors ${
+        active
+          ? 'bg-[#58a6ff] text-white'
+          : 'bg-[rgba(48,54,61,0.6)] text-[#8b949e] hover:text-[#e6edf3]'
+      }`}
+    >{label}</button>
+  )
+}
+
+// ── Unit selector ─────────────────────────────────────────────────────────
+function UnitSelect({ value, onChange, options }) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="appearance-none bg-[rgba(48,54,61,0.6)] border border-[rgba(48,54,61,0.4)] text-[#e6edf3] text-[10px] rounded-md px-2 py-1 pr-5 focus:outline-none focus:border-[#58a6ff]/50 cursor-pointer"
+      >
+        {options.map((o) => (
+          <option key={o.unit_label} value={o.unit_label}>{o.unit_label}</option>
+        ))}
+      </select>
+      <ChevronDown size={10} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[#8b949e] pointer-events-none" />
+    </div>
+  )
+}
+
+// ── Single matched product card with size + unit panel ────────────────────
+function MatchedItemCard({ item, onRemove, onUpdate }) {
+  const sizeOpts = item.size_options?.length
+    ? item.size_options
+    : STANDARD_SIZES.map((s) => ({ size_label: s, unit_price: null, is_default: s === '750ml' }))
+
+  const unitOpts = item.unit_options?.length
+    ? item.unit_options
+    : [
+        { unit_label: 'Bottle',     bottles_per_unit: 1 },
+        { unit_label: 'Half Case',  bottles_per_unit: 6 },
+        { unit_label: 'Case',       bottles_per_unit: 12 },
+        { unit_label: 'Mixed Case', bottles_per_unit: 12 },
+      ]
+
+  const selSize = item.selected_size || '750ml'
+  const selUnit = item.selected_unit || 'Case'
+
+  const currentSizeOpt = sizeOpts.find((s) => s.size_label === selSize) || sizeOpts[0]
+  const currentUnitOpt = unitOpts.find((u) => u.unit_label === selUnit) || unitOpts[0]
+
+  const effectivePrice = currentSizeOpt?.unit_price != null
+    ? (currentSizeOpt.unit_price * currentUnitOpt.bottles_per_unit).toFixed(2)
+    : null
+
+  return (
+    <div className="p-3 rounded-xl bg-[rgba(22,27,34,0.8)] border border-[rgba(48,54,61,0.6)] space-y-2">
+      {/* Product name row */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-[#e6edf3] text-sm font-medium leading-snug truncate">{item.product_name}</p>
+          <p className="text-[#8b949e] text-[10px]">matched from "{item.matched_from}"</p>
+        </div>
+        <button onClick={() => onRemove(item.product_id)}
+          className="shrink-0 text-[#8b949e] hover:text-red-400 transition-colors p-0.5">
+          <X size={14} />
+        </button>
+      </div>
+
+      {/* Size pills */}
+      <div className="flex flex-wrap gap-1">
+        {sizeOpts.map((s) => (
+          <SizeBtn
+            key={s.size_label}
+            label={s.size_label}
+            active={s.size_label === selSize}
+            onClick={() => onUpdate(item.product_id, 'size', s.size_label)}
+          />
+        ))}
+      </div>
+
+      {/* Unit + qty + price row */}
+      <div className="flex items-center gap-2">
+        <UnitSelect
+          value={selUnit}
+          onChange={(v) => onUpdate(item.product_id, 'unit', v)}
+          options={unitOpts}
+        />
+        <div className="flex items-center gap-1 ml-auto">
+          <button
+            onClick={() => onUpdate(item.product_id, 'qty', Math.max(1, item.quantity - 1))}
+            className="w-6 h-6 rounded-md bg-[rgba(48,54,61,0.8)] text-[#e6edf3] text-sm flex items-center justify-center hover:bg-[rgba(48,54,61,1)]"
+          >−</button>
+          <span className="text-[#e6edf3] text-sm font-mono w-6 text-center">{item.quantity}</span>
+          <button
+            onClick={() => onUpdate(item.product_id, 'qty', item.quantity + 1)}
+            className="w-6 h-6 rounded-md bg-[rgba(48,54,61,0.8)] text-[#e6edf3] text-sm flex items-center justify-center hover:bg-[rgba(48,54,61,1)]"
+          >+</button>
+        </div>
+        {effectivePrice && (
+          <span className="text-[#58a6ff] text-xs font-mono shrink-0">${effectivePrice}</span>
+        )}
+      </div>
+
+      {/* Bottle count hint */}
+      <p className="text-[#484f58] text-[10px]">
+        {currentUnitOpt.bottles_per_unit} btl/{selUnit.toLowerCase()} · {item.quantity * currentUnitOpt.bottles_per_unit} bottles total
+      </p>
+    </div>
+  )
+}
+
+// ── Main VoiceInput ───────────────────────────────────────────────────────
 export default function VoiceInput() {
   const { recording, error: micError, start, stopAndGetBlob } = useVoiceRecorder()
   const [loading, setLoading] = useState(false)
   const [transcript, setTranscript] = useState('')
-  // Accumulate across recordings — never cleared until "Add All"
-  const [accumulated, setAccumulated] = useState([])   // matched items
-  const [unmatched, setUnmatched] = useState([])        // unmatched items
+  const [accumulated, setAccumulated] = useState([])
+  const [unmatched, setUnmatched] = useState([])
+  const addItem = useOrderStore((s) => s.addItem)
   const addResolvedItem = useOrderStore((s) => s.addResolvedItem)
 
   const handleStopAndParse = async () => {
@@ -108,7 +230,6 @@ export default function VoiceInput() {
       const { data } = await client.post('/ai/voice', form)
       if (data.transcript) setTranscript(data.transcript)
 
-      // Merge new matched items with existing, skip duplicates by product_id
       if (data.resolved?.length) {
         setAccumulated((prev) => {
           const existing = new Set(prev.map((p) => p.product_id))
@@ -123,7 +244,6 @@ export default function VoiceInput() {
         })
       }
 
-      // Merge unmatched too (skip already-there names)
       if (data.unmatched?.length) {
         setUnmatched((prev) => {
           const existing = new Set(prev.map((u) => u.name.toLowerCase()))
@@ -140,50 +260,48 @@ export default function VoiceInput() {
     finally { setLoading(false) }
   }
 
-  const promoteUnmatched = (item, resolvedItem) => {
-    setUnmatched((prev) => prev.filter((u) => u !== item))
+  const updateAccumulated = (productId, field, value) => {
+    setAccumulated((prev) =>
+      prev.map((item) => {
+        if (item.product_id !== productId) return item
+        if (field === 'qty') return { ...item, quantity: value }
+        if (field === 'size') return { ...item, selected_size: value }
+        if (field === 'unit') {
+          const unitOpt = (item.unit_options || []).find((u) => u.unit_label === value) || { unit_label: value, bottles_per_unit: 12 }
+          return { ...item, selected_unit: value, bottles_per_unit: unitOpt.bottles_per_unit }
+        }
+        return item
+      })
+    )
+  }
+
+  const promoteUnmatched = (resolvedItem) => {
+    setUnmatched((prev) => prev.filter((u) => u.name !== resolvedItem.matched_from))
     setAccumulated((prev) => {
       if (prev.find((p) => p.product_id === resolvedItem.product_id)) {
         toast('Already in list')
         return prev
       }
+      toast.success(`${resolvedItem.product_name} matched`)
       return [...prev, resolvedItem]
     })
-    toast.success(`${resolvedItem.product_name} matched`)
-  }
-
-  const dismissUnmatched = (item) => {
-    setUnmatched((prev) => prev.filter((u) => u !== item))
-  }
-
-  const removeMatched = (productId) => {
-    setAccumulated((prev) => prev.filter((p) => p.product_id !== productId))
-  }
-
-  const updateQty = (productId, delta) => {
-    setAccumulated((prev) =>
-      prev.map((p) =>
-        p.product_id === productId
-          ? { ...p, quantity: Math.max(1, p.quantity + delta) }
-          : p
-      )
-    )
   }
 
   const addAll = () => {
-    accumulated.forEach((item) => addResolvedItem(item))
+    accumulated.forEach((item) => {
+      const sizeOpt = (item.size_options || []).find((s) => s.size_label === item.selected_size)
+        || { size_label: item.selected_size || '750ml' }
+      const unitOpt = (item.unit_options || []).find((u) => u.unit_label === item.selected_unit)
+        || { unit_label: item.selected_unit || 'Case', bottles_per_unit: item.bottles_per_unit || 12 }
+      addItem(item, sizeOpt, unitOpt, item.quantity)
+    })
     setAccumulated([])
     setUnmatched([])
     setTranscript('')
     toast.success(`${accumulated.length} items added to cart`)
   }
 
-  const clearAll = () => {
-    setAccumulated([])
-    setUnmatched([])
-    setTranscript('')
-  }
-
+  const clearAll = () => { setAccumulated([]); setUnmatched([]); setTranscript('') }
   const hasItems = accumulated.length > 0 || unmatched.length > 0
 
   return (
@@ -225,7 +343,7 @@ export default function VoiceInput() {
         )}
       </div>
 
-      {/* Transcript (last recording) */}
+      {/* Transcript */}
       {transcript && (
         <div className="glass-card p-3">
           <p className="text-[10px] text-[#8b949e] uppercase tracking-wider mb-1">Last heard</p>
@@ -233,7 +351,7 @@ export default function VoiceInput() {
         </div>
       )}
 
-      {/* Accumulated matched items */}
+      {/* Matched items with size/unit panels */}
       {accumulated.length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-2.5">
@@ -241,38 +359,18 @@ export default function VoiceInput() {
               <CheckCircle size={14} className="text-green-400" />
               Matched ({accumulated.length})
             </h3>
-            <div className="flex items-center gap-2">
-              <button onClick={clearAll} className="text-xs text-[#8b949e] hover:text-[#e6edf3] flex items-center gap-1">
-                <RotateCcw size={11} /> Clear all
-              </button>
-            </div>
+            <button onClick={clearAll} className="text-xs text-[#8b949e] hover:text-[#e6edf3] flex items-center gap-1">
+              <RotateCcw size={11} /> Clear all
+            </button>
           </div>
           <div className="space-y-2">
             {accumulated.map((item) => (
-              <div key={item.product_id} className="flex items-center gap-2 p-3 glass-card group">
-                <div className="flex-1 min-w-0">
-                  <p className="text-[#e6edf3] text-sm font-medium truncate">{item.product_name}</p>
-                  <p className="text-[#8b949e] text-xs truncate">from: "{item.matched_from}"</p>
-                </div>
-                {/* Qty controls inline */}
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    onClick={() => updateQty(item.product_id, -1)}
-                    className="w-6 h-6 rounded-md bg-[rgba(48,54,61,0.8)] text-[#e6edf3] flex items-center justify-center hover:bg-[rgba(48,54,61,1)] text-sm transition-colors"
-                  >−</button>
-                  <span className="text-[#e6edf3] text-sm font-mono w-6 text-center">{item.quantity}</span>
-                  <button
-                    onClick={() => updateQty(item.product_id, 1)}
-                    className="w-6 h-6 rounded-md bg-[rgba(48,54,61,0.8)] text-[#e6edf3] flex items-center justify-center hover:bg-[rgba(48,54,61,1)] text-sm transition-colors"
-                  >+</button>
-                </div>
-                <button
-                  onClick={() => removeMatched(item.product_id)}
-                  className="shrink-0 w-7 h-7 rounded-lg text-[#8b949e] hover:text-red-400 hover:bg-red-400/10 flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100"
-                >
-                  <X size={14} />
-                </button>
-              </div>
+              <MatchedItemCard
+                key={item.product_id}
+                item={item}
+                onRemove={(id) => setAccumulated((prev) => prev.filter((p) => p.product_id !== id))}
+                onUpdate={updateAccumulated}
+              />
             ))}
           </div>
           <button onClick={addAll} className="btn-primary w-full mt-3 text-sm py-2.5">
@@ -293,8 +391,8 @@ export default function VoiceInput() {
               <UnmatchedItem
                 key={i}
                 item={item}
-                onPromote={(resolved) => promoteUnmatched(item, resolved)}
-                onDismiss={() => dismissUnmatched(item)}
+                onPromote={promoteUnmatched}
+                onDismiss={() => setUnmatched((prev) => prev.filter((u) => u !== item))}
               />
             ))}
           </div>

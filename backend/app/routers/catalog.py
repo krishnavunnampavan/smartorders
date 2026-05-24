@@ -38,11 +38,23 @@ async def upload_catalog(
     # ── 1. Parse the file ──────────────────────────────────────────────────
     try:
         if ext in ("xlsx", "xls", "csv"):
-            parsed_items = extract_from_excel(content)
+            parsed_items = extract_from_excel(content, fname)
         elif ext == "pdf":
             raw_text = extract_text_from_pdf(content)
-            parsed_items = await ai.parse_catalog_text(raw_text)
-            ai_provider = ai.get_active_provider()
+            if len(raw_text.strip()) > 200:
+                # Good text extraction — use AI text parse
+                parsed_items = await ai.parse_catalog_text(raw_text)
+                ai_provider = ai.get_active_provider()
+            else:
+                # Text extraction failed/sparse — render pages as images
+                from app.services.catalog_parser import pdf_pages_to_images
+                pages = pdf_pages_to_images(content, max_pages=5)
+                all_items: list[dict] = []
+                for b64, mime in pages:
+                    page_items = await ai.parse_catalog_image(b64, mime)
+                    all_items.extend(page_items)
+                parsed_items = all_items
+                ai_provider = "claude-vision" if ai.claude_key else "openai-vision"
         else:
             b64, media_type = image_to_base64(content, file.content_type or "image/jpeg")
             parsed_items = await ai.parse_catalog_image(b64, media_type)
@@ -56,10 +68,11 @@ async def upload_catalog(
 
     if not resolved_company_id:
         # Use raw_text (PDF/text) or filename as hint
-        source_text = raw_text or fname
+        source_text = raw_text or ""
         company_info = await extract_company_from_text(
             source_text,
             ai_service=ai if (ai.openai_key or ai.claude_key) else None,
+            filename=fname,
         )
         if company_info.get("name"):
             company, created = find_or_create_company(db, company_info)

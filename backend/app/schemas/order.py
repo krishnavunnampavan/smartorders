@@ -7,20 +7,26 @@ from pydantic import BaseModel
 
 class OrderItemCreate(BaseModel):
     product_id: UUID
-    company_id: UUID
+    company_id: Optional[UUID] = None
     quantity: int
     unit_price: Optional[Decimal] = None
     source: str = "manual"
+    selected_size: Optional[str] = "750ml"
+    selected_unit: Optional[str] = "Case"
+    bottles_per_unit: Optional[int] = 1
 
 
 class OrderItemUpdate(BaseModel):
-    quantity: int
+    quantity: Optional[int] = None
+    selected_size: Optional[str] = None
+    selected_unit: Optional[str] = None
+    bottles_per_unit: Optional[int] = None
 
 
 class OrderItemOut(BaseModel):
     id: UUID
     product_id: UUID
-    company_id: UUID
+    company_id: Optional[UUID]
     quantity: int
     unit_price: Optional[Decimal]
     line_total: Optional[Decimal]
@@ -28,6 +34,10 @@ class OrderItemOut(BaseModel):
     price_change: Optional[Decimal]
     source: Optional[str]
     was_held: bool
+    selected_size: Optional[str]
+    selected_unit: Optional[str]
+    bottles_per_unit: Optional[int]
+    total_bottles: Optional[int]
 
     model_config = {"from_attributes": True}
 

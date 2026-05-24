@@ -37,8 +37,12 @@ class OrderItem(Base):
     line_total = Column(Numeric(10, 2))
     price_status = Column(String(30))
     price_change = Column(Numeric(10, 2))
-    source = Column(String(30))          # manual, voice, photo, auto_deal
+    source = Column(String(30))
     was_held = Column(Boolean, default=False)
+    selected_size = Column(String(20))
+    selected_unit = Column(String(30))
+    bottles_per_unit = Column(Integer, default=1)
+    total_bottles = Column(Integer)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     order = relationship("Order", back_populates="items")
