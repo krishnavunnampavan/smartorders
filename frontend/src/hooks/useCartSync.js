@@ -1,30 +1,25 @@
 /**
- * useCartSync — persistent WebSocket connection to /ws/cart.
+ * useCartSync — Cart synchronization hook.
  *
- * In dev:  connects to same host (Vite proxies /ws → backend)
- * In prod: uses VITE_WS_URL env var if set (Railway backend), otherwise
- *          falls back to same host (works when backend is on Vercel too).
+ * Default mode (Vercel / no VITE_WS_URL): pure REST polling.
+ *   · Polls GET /api/cart every 8s when tab is visible.
+ *   · Drops to 60s when tab is hidden (Page Visibility API).
+ *   · Re-polls immediately when tab comes back into focus.
  *
- * When WebSocket is unavailable (e.g. Vercel serverless), the hook
- * gracefully degrades: shows "disconnected" status and polls the REST
- * API every 30s so the cart stays fresh without real-time sync.
+ * Optional WebSocket mode: set VITE_WS_URL env var to a WS backend URL.
+ *   · Tries WS up to 3 times, then permanently falls back to polling.
+ *   · Polling fills the gap between WS failure and reconnect.
  */
 import { useEffect, useRef } from 'react'
 import { useOrderStore } from '../store/orderStore'
-import cartAPI from '../api/cart'
 
-// In production you can point at a separate backend (Railway/Render) via env var
-const WS_URL = (() => {
-  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL
-  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${window.location.host}/ws/cart`
-})()
+const POLL_ACTIVE_MS  = 8_000   // 8s while tab is visible
+const POLL_IDLE_MS    = 60_000  // 60s while tab is hidden
+const PING_MS         = 25_000
+const MAX_WS_RETRIES  = 3
 
-const PING_INTERVAL_MS  = 30_000
-const POLL_INTERVAL_MS  = 30_000   // REST polling when WS is unavailable
-const BASE_BACKOFF_MS   = 1_000
-const MAX_BACKOFF_MS    = 60_000   // cap retry at 1 minute on repeated failures
-const MAX_RETRIES       = 8        // stop WS retries after this; switch to polling
+// Only attempt WebSocket when the caller explicitly provides a WS URL.
+const WS_URL = import.meta.env.VITE_WS_URL || null
 
 export function useCartSync() {
   const setWsStatus          = useOrderStore((s) => s.setWsStatus)
@@ -36,92 +31,107 @@ export function useCartSync() {
   const clearItemsFromServer = useOrderStore((s) => s.clearItemsFromServer)
   const loadCart             = useOrderStore((s) => s.loadCart)
 
-  const wsRef       = useRef(null)
-  const retryRef    = useRef(0)
-  const pingRef     = useRef(null)
-  const pollRef     = useRef(null)
-  const unmountRef  = useRef(false)
-  const pollingMode = useRef(false)
+  const timerRef   = useRef(null)
+  const wsRef      = useRef(null)
+  const pingRef    = useRef(null)
+  const retriesRef = useRef(0)
+  const deadRef    = useRef(false)
 
   useEffect(() => {
-    unmountRef.current  = false
-    pollingMode.current = false
+    deadRef.current = false
 
-    function startPolling() {
-      if (pollingMode.current) return
-      pollingMode.current = true
-      setWsStatus('disconnected')
-      // Poll REST API periodically to keep cart in sync
-      pollRef.current = setInterval(() => {
-        if (!unmountRef.current) loadCart()
-      }, POLL_INTERVAL_MS)
+    // ── Polling ──────────────────────────────────────────────────────────────
+    function scheduleNext() {
+      clearTimeout(timerRef.current)
+      const delay = document.hidden ? POLL_IDLE_MS : POLL_ACTIVE_MS
+      timerRef.current = setTimeout(tick, delay)
     }
 
-    function connect() {
-      if (unmountRef.current || pollingMode.current) return
+    function tick() {
+      if (deadRef.current) return
+      loadCart().finally(scheduleNext)
+    }
 
-      // Give up on WS after too many retries, switch to polling
-      if (retryRef.current >= MAX_RETRIES) {
+    function startPolling() {
+      setWsStatus('connected')  // treat polling as "live"
+      loadCart()
+      scheduleNext()
+    }
+
+    function onVisibility() {
+      if (!document.hidden && !deadRef.current) {
+        clearTimeout(timerRef.current)
+        tick()
+      }
+    }
+
+    document.addEventListener('visibilitychange', onVisibility)
+
+    // ── WebSocket (optional) ──────────────────────────────────────────────────
+    function tryWS() {
+      if (deadRef.current || retriesRef.current >= MAX_WS_RETRIES) {
         startPolling()
         return
       }
 
       setWsStatus('connecting')
       let ws
-      try {
-        ws = new WebSocket(WS_URL)
-      } catch {
-        startPolling()
-        return
-      }
+      try { ws = new WebSocket(WS_URL) } catch { startPolling(); return }
       wsRef.current = ws
 
       ws.onopen = () => {
-        retryRef.current = 0
+        retriesRef.current = 0
         setWsStatus('connected')
+        clearTimeout(timerRef.current)  // WS is live; stop polling timer
         pingRef.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }))
-        }, PING_INTERVAL_MS)
+        }, PING_MS)
       }
 
       ws.onmessage = (ev) => {
         let msg
         try { msg = JSON.parse(ev.data) } catch { return }
-
         switch (msg.type) {
           case 'CART_STATE':
             setItems(msg.cart?.items ?? [])
             if (msg.connection_count != null) setConnectionCount(msg.connection_count)
             break
-          case 'ITEM_ADDED':     addItemFromServer(msg.item);         break
-          case 'ITEM_UPDATED':   updateItemFromServer(msg.item);      break
-          case 'ITEM_REMOVED':   removeItemFromServer(msg.item_id);   break
-          case 'CART_CLEARED':   clearItemsFromServer();              break
+          case 'ITEM_ADDED':       addItemFromServer(msg.item);       break
+          case 'ITEM_UPDATED':     updateItemFromServer(msg.item);    break
+          case 'ITEM_REMOVED':     removeItemFromServer(msg.item_id); break
+          case 'CART_CLEARED':     clearItemsFromServer();            break
           case 'CONNECTION_COUNT': setConnectionCount(msg.count);     break
           default: break
         }
       }
 
-      ws.onclose = (ev) => {
+      ws.onclose = () => {
         clearInterval(pingRef.current)
-        if (unmountRef.current) return
-
+        if (deadRef.current) return
         setWsStatus('disconnected')
-        const delay = Math.min(BASE_BACKOFF_MS * 2 ** retryRef.current, MAX_BACKOFF_MS)
-        retryRef.current += 1
-        setTimeout(connect, delay)
+        retriesRef.current += 1
+        const delay = Math.min(1_000 * 2 ** retriesRef.current, 30_000)
+        setTimeout(tryWS, delay)
+        // Poll while waiting for WS reconnect
+        scheduleNext()
       }
 
-      ws.onerror = () => { ws.close() }
+      ws.onerror = () => ws.close()
     }
 
-    connect()
+    // ── Kick off ─────────────────────────────────────────────────────────────
+    if (WS_URL) {
+      tryWS()
+    } else {
+      startPolling()
+    }
 
     return () => {
-      unmountRef.current = true
+      deadRef.current = true
+      clearTimeout(timerRef.current)
       clearInterval(pingRef.current)
-      clearInterval(pollRef.current)
       wsRef.current?.close()
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 }

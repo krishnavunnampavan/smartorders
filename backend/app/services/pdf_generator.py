@@ -1,247 +1,320 @@
-"""Generate purchase order PDFs. Falls back to HTML if weasyprint unavailable."""
+"""Generate purchase order PDFs using fpdf2 (pure Python, works on Vercel/serverless).
+Falls back to HTML bytes only if fpdf2 is somehow unavailable."""
 from datetime import datetime
 
-_CSS = """
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #1a1a2e; background: #fff; }
-.page { max-width: 960px; margin: 0 auto; padding: 36px 40px 48px; }
-/* Header */
-.header { display: flex; justify-content: space-between; align-items: flex-start;
-          border-bottom: 3px solid #1a1a2e; padding-bottom: 16px; margin-bottom: 24px; }
-.brand { font-size: 22px; font-weight: 800; color: #1a1a2e; letter-spacing: -0.5px; }
-.brand span { color: #2563eb; }
-.meta-block { text-align: right; font-size: 11px; color: #555; line-height: 1.7; }
-.meta-block strong { color: #1a1a2e; }
-/* Summary strip */
-.summary { display: flex; gap: 0; margin-bottom: 28px; border: 1px solid #e2e8f0;
-           border-radius: 8px; overflow: hidden; }
-.summary-cell { flex: 1; padding: 10px 14px; border-right: 1px solid #e2e8f0; }
-.summary-cell:last-child { border-right: none; }
-.summary-cell .label { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #64748b; }
-.summary-cell .val { font-size: 18px; font-weight: 700; color: #1a1a2e; margin-top: 2px; }
-.summary-cell.accent .val { color: #2563eb; }
-.summary-cell.green .val { color: #16a34a; }
-/* Distributor section */
-.dist-section { margin-bottom: 28px; break-inside: avoid; }
-.dist-header { display: flex; justify-content: space-between; align-items: center;
-               background: #1a1a2e; color: #fff; padding: 9px 14px; border-radius: 6px 6px 0 0; }
-.dist-header .dist-name { font-size: 13px; font-weight: 700; letter-spacing: .02em; }
-.dist-header .dist-meta { font-size: 11px; color: #94a3b8; }
-.dist-header.misc { background: #64748b; }
-/* Item table */
-table { width: 100%; border-collapse: collapse; }
-thead tr { background: #f1f5f9; }
-th { padding: 7px 8px; text-align: left; font-size: 10px; text-transform: uppercase;
-     letter-spacing: .05em; color: #475569; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
-th.num { text-align: right; }
-td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; font-size: 11px;
-     color: #1e293b; vertical-align: middle; }
-td.num { text-align: right; font-variant-numeric: tabular-nums; }
-tr:last-child td { border-bottom: none; }
-tr:nth-child(even) td { background: #fafafa; }
-.badge { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px;
-         border-radius: 4px; letter-spacing: .04em; vertical-align: middle; margin-left: 4px; }
-.badge-deal { background: #d1fae5; color: #065f46; }
-.badge-hold { background: #fef3c7; color: #92400e; }
-.badge-rdeal { background: #a7f3d0; color: #064e3b; }
-.size-pill { display: inline-block; background: #eff6ff; color: #1d4ed8; font-size: 9px;
-             font-weight: 600; padding: 1px 5px; border-radius: 3px; margin-right: 3px; }
-.unit-dim { color: #94a3b8; font-size: 10px; }
-/* Subtotal row */
-.subtotal-row td { background: #f8fafc; font-weight: 600; font-size: 12px;
-                   border-top: 1.5px solid #cbd5e1; }
-/* Grand total */
-.grand-total { text-align: right; margin-top: 28px; padding: 14px 18px;
-               background: #1a1a2e; color: #fff; border-radius: 8px;
-               font-size: 16px; font-weight: 700; }
-.grand-total span { color: #60a5fa; margin-left: 12px; font-size: 20px; }
-/* Footer */
-.footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid #e2e8f0;
-          font-size: 10px; color: #94a3b8; text-align: center; }
-/* Company PDF only header */
-.company-strip { background: #eff6ff; border: 1px solid #bfdbfe;
-                 border-radius: 8px; padding: 10px 16px; margin-bottom: 20px; }
-.company-strip .cname { font-size: 16px; font-weight: 800; color: #1e3a8a; }
-.company-strip .cmeta { font-size: 11px; color: #3b82f6; margin-top: 2px; }
-@media print {
-  .page { padding: 20px; }
-  .dist-section { break-inside: avoid; }
-}
-"""
+# ── Colors ────────────────────────────────────────────────────────────────────
+_DARK       = (26, 26, 46)
+_BLUE       = (37, 99, 235)
+_GRAY       = (100, 116, 139)
+_LIGHT_BG   = (241, 245, 249)
+_GREEN      = (22, 163, 74)
+_WARN       = (202, 138, 4)
+_WHITE      = (255, 255, 255)
+_STRIP_BG   = (248, 250, 252)
+_BORDER_CLR = (226, 232, 240)
+_SUB_LINE   = (203, 213, 225)
 
 
-def _to_bytes(html: str) -> bytes:
-    try:
-        from weasyprint import HTML
-        return HTML(string=html).write_pdf()
-    except (ImportError, OSError):
-        return html.encode("utf-8")
+def _make_pdf(order_month: str, groups: list[dict], is_single: bool = False,
+              single_company: str = "") -> bytes:
+    from fpdf import FPDF
 
+    pdf = FPDF("P", "mm", "Letter")
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.set_margins(14, 14, 14)
+    pdf.add_page()
 
-# ── Single-distributor PDF ──────────────────────────────────────────────────
-def generate_order_pdf(order_data: dict) -> bytes:
-    return _to_bytes(_build_single_html(order_data))
+    W = pdf.w - 28  # usable content width
 
-
-def _build_single_html(data: dict) -> str:
-    items = data.get("items", [])
-    subtotal = float(data.get("subtotal", 0))
-    total_bottles = sum(i.get("total_bottles") or i.get("quantity", 0) for i in items)
-    deals = sum(1 for i in items if i.get("price_status") == "DEAL")
-    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>Purchase Order — {_esc(data.get('company_name', ''))}</title>
-<style>{_CSS}</style></head>
-<body><div class="page">
-  {_header(data.get('order_month', ''), 1, len(items), subtotal, total_bottles, deals)}
-  <div class="company-strip">
-    <div class="cname">{_esc(data.get('company_name', ''))}</div>
-    <div class="cmeta">{len(items)} line items &nbsp;·&nbsp; {total_bottles:,} total bottles &nbsp;·&nbsp; ${subtotal:,.2f}</div>
-  </div>
-  <div class="dist-section">
-    {_items_table(items, subtotal)}
-  </div>
-  <div class="grand-total">Order Total<span>${subtotal:,.2f}</span></div>
-  {_footer()}
-</div></body></html>"""
-
-
-# ── Combined master PDF (all distributors) ─────────────────────────────────
-def generate_combined_pdf(order_month: str, groups: list[dict]) -> bytes:
-    return _to_bytes(_build_combined_html(order_month, groups))
-
-
-def _build_combined_html(order_month: str, groups: list[dict]) -> str:
-    total_items = sum(len(g["items"]) for g in groups)
-    grand_total = sum(g["subtotal"] for g in groups)
+    total_items   = sum(len(g["items"]) for g in groups)
+    grand_total   = sum(g["subtotal"] for g in groups)
     total_bottles = sum(
         sum(i.get("total_bottles") or i.get("quantity", 0) for i in g["items"])
         for g in groups
     )
-    deals = sum(
-        sum(1 for i in g["items"] if i.get("price_status") == "DEAL")
-        for g in groups
-    )
     dist_count = sum(1 for g in groups if not g.get("is_misc"))
 
-    sections_html = ""
+    # ── Header bar ────────────────────────────────────────────────────────────
+    pdf.set_fill_color(*_DARK)
+    pdf.rect(14, 14, W, 13, "F")
+
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(*_WHITE)
+    pdf.set_xy(17, 16)
+    pdf.cell(W * 0.55, 8, "LiquorStore Pro  |  Purchase Order", ln=False)
+
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(148, 163, 184)
+    pdf.set_xy(17, 24.5)
+    generated = datetime.utcnow().strftime("%b %d, %Y %H:%M UTC")
+    pdf.cell(W - 6, 4, f"Order Month: {order_month}    Generated: {generated}", ln=True, align="R")
+
+    pdf.ln(4)
+
+    # ── Summary strip ─────────────────────────────────────────────────────────
+    cells = [
+        ("Distributors", str(dist_count),       _BLUE),
+        ("Line Items",   str(total_items),       _DARK),
+        ("Total Bottles", f"{total_bottles:,}",  _DARK),
+        ("Order Value",  f"${grand_total:,.2f}", _BLUE),
+    ]
+    cell_w = W / len(cells)
+    strip_y = pdf.get_y()
+
+    for idx, (label, value, color) in enumerate(cells):
+        x = 14 + idx * cell_w
+        pdf.set_fill_color(255, 255, 255)
+        pdf.set_draw_color(*_BORDER_CLR)
+        pdf.set_line_width(0.2)
+        pdf.rect(x, strip_y, cell_w, 16, "FD")
+
+        pdf.set_font("Helvetica", "", 6.5)
+        pdf.set_text_color(*_GRAY)
+        pdf.set_xy(x + 3, strip_y + 3)
+        pdf.cell(cell_w - 6, 3.5, label.upper(), ln=False)
+
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.set_text_color(*color)
+        pdf.set_xy(x + 3, strip_y + 7.5)
+        pdf.cell(cell_w - 6, 7, value, ln=False)
+
+    pdf.set_y(strip_y + 20)
+
+    # ── Company strip for single-distributor PDF ───────────────────────────────
+    if is_single and single_company:
+        y2 = pdf.get_y()
+        pdf.set_fill_color(239, 246, 255)
+        pdf.set_draw_color(191, 219, 254)
+        pdf.set_line_width(0.3)
+        pdf.rect(14, y2, W, 14, "FD")
+
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_text_color(30, 58, 138)
+        pdf.set_xy(17, y2 + 2.5)
+        pdf.cell(W - 6, 6, single_company, ln=False)
+
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(59, 130, 246)
+        pdf.set_xy(17, y2 + 9)
+        pdf.cell(W - 6, 4,
+                 f"{total_items} line items  ·  {total_bottles:,} bottles  ·  ${grand_total:,.2f}",
+                 ln=True)
+        pdf.ln(4)
+
+    # ── Distributor sections ──────────────────────────────────────────────────
     for g in groups:
-        is_misc = g.get("is_misc", False)
-        hdr_class = "dist-header misc" if is_misc else "dist-header"
-        name = g["company_name"]
-        items = g["items"]
-        sub = g["subtotal"]
-        dist_bottles = sum(i.get("total_bottles") or i.get("quantity", 0) for i in items)
-        sections_html += f"""
-  <div class="dist-section">
-    <div class="{hdr_class}">
-      <span class="dist-name">{_esc(name)}</span>
-      <span class="dist-meta">{len(items)} item{'s' if len(items)!=1 else ''}
-        &nbsp;·&nbsp; {dist_bottles:,} btl &nbsp;·&nbsp; ${sub:,.2f}</span>
-    </div>
-    {_items_table(items, sub)}
-  </div>"""
+        _dist_section(pdf, g, W)
 
-    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>Master Purchase Order — {_esc(order_month)}</title>
-<style>{_CSS}</style></head>
-<body><div class="page">
-  {_header(order_month, dist_count, total_items, grand_total, total_bottles, deals)}
-  {sections_html}
-  <div class="grand-total">Grand Total<span>${grand_total:,.2f}</span></div>
-  {_footer()}
-</div></body></html>"""
+    # ── Grand Total ───────────────────────────────────────────────────────────
+    pdf.ln(3)
+    gt_y = pdf.get_y()
+    pdf.set_fill_color(*_DARK)
+    pdf.rect(14, gt_y, W, 12, "F")
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(*_WHITE)
+    label = "Order Total" if is_single else "Grand Total"
+    pdf.set_xy(14, gt_y + 2)
+    pdf.cell(W - 4, 8, f"{label}:   ${grand_total:,.2f}", ln=True, align="R")
+
+    # ── Footer ────────────────────────────────────────────────────────────────
+    pdf.set_y(-15)
+    pdf.set_font("Helvetica", "", 7.5)
+    pdf.set_text_color(*_GRAY)
+    pdf.cell(0, 5, f"Generated by LiquorStore Pro  ·  {datetime.utcnow().strftime('%Y-%m-%d')}",
+             align="C")
+
+    return bytes(pdf.output())
 
 
-# ── Helpers ─────────────────────────────────────────────────────────────────
-def _header(order_month, dist_count, item_count, total, total_bottles=0, deals=0) -> str:
-    savings_html = ""
-    if deals > 0:
-        savings_html = f'<div class="summary-cell green"><div class="label">DEAL Items</div><div class="val">{deals}</div></div>'
-    return f"""
-<div class="header">
-  <div>
-    <div class="brand">&#127870; <span>LiquorStore</span> Pro</div>
-    <div style="font-size:13px;color:#475569;margin-top:6px;">Purchase Order</div>
-  </div>
-  <div class="meta-block">
-    <strong>Order Month:</strong> {_esc(order_month)}<br>
-    <strong>Generated:</strong> {datetime.utcnow().strftime('%b %d, %Y %H:%M')} UTC
-  </div>
-</div>
-<div class="summary">
-  <div class="summary-cell accent"><div class="label">Distributors</div><div class="val">{dist_count}</div></div>
-  <div class="summary-cell"><div class="label">Line Items</div><div class="val">{item_count}</div></div>
-  <div class="summary-cell"><div class="label">Total Bottles</div><div class="val">{total_bottles:,}</div></div>
-  <div class="summary-cell"><div class="label">Order Value</div><div class="val">${total:,.2f}</div></div>
-  {savings_html}
-</div>"""
+def _dist_section(pdf, g: dict, W: float) -> None:
+    name        = g["company_name"]
+    items       = g["items"]
+    sub         = g["subtotal"]
+    is_misc     = g.get("is_misc", False)
+    dist_btl    = sum(i.get("total_bottles") or i.get("quantity", 0) for i in items)
+    hdr_rgb     = (100, 116, 139) if is_misc else _DARK
+
+    # Page break guard
+    if pdf.get_y() + 28 > pdf.h - 20:
+        pdf.add_page()
+
+    # Section header
+    y = pdf.get_y()
+    pdf.set_fill_color(*hdr_rgb)
+    pdf.rect(14, y, W, 8.5, "F")
+    pdf.set_font("Helvetica", "B", 9.5)
+    pdf.set_text_color(*_WHITE)
+    pdf.set_xy(17, y + 1.5)
+    pdf.cell(W * 0.55, 5.5, name[:55], ln=False)
+
+    pdf.set_font("Helvetica", "", 7.5)
+    pdf.set_text_color(148, 163, 184)
+    pdf.set_xy(17 + W * 0.55, y + 2)
+    pdf.cell(W * 0.42, 4.5,
+             f"{len(items)} item{'s' if len(items) != 1 else ''}  ·  {dist_btl:,} btl  ·  ${sub:,.2f}",
+             ln=True, align="R")
+
+    # Column definitions  (name, width_fraction, text_align)
+    cols = [
+        ("Product",    0.355, "L"),
+        ("Size",       0.080, "C"),
+        ("Unit",       0.095, "C"),
+        ("Qty",        0.065, "R"),
+        ("Btl/Unit",   0.080, "R"),
+        ("Total Btl",  0.090, "R"),
+        ("Unit Price", 0.100, "R"),
+        ("Line Total", 0.135, "R"),
+    ]
+    col_widths = [W * f for _, f, _ in cols]
+
+    # Table header row
+    th_y = pdf.get_y()
+    pdf.set_fill_color(*_LIGHT_BG)
+    pdf.rect(14, th_y, W, 6, "F")
+    pdf.set_font("Helvetica", "B", 6.5)
+    pdf.set_text_color(71, 85, 105)
+    x = 14
+    for (col_name, _, align), cw in zip(cols, col_widths):
+        pdf.set_xy(x + 1, th_y + 1.5)
+        pdf.cell(cw - 2, 3.5, col_name.upper(), ln=False, align=align)
+        x += cw
+    pdf.ln(6)
+
+    # Data rows
+    for row_idx, item in enumerate(items):
+        _item_row(pdf, item, cols, col_widths, row_idx, W)
+
+    # Subtotal row
+    sub_y = pdf.get_y()
+    pdf.set_fill_color(*_STRIP_BG)
+    pdf.rect(14, sub_y, W, 6, "F")
+    pdf.set_draw_color(*_SUB_LINE)
+    pdf.set_line_width(0.35)
+    pdf.line(14, sub_y, 14 + W, sub_y)
+    pdf.set_font("Helvetica", "B", 8.5)
+    pdf.set_text_color(71, 85, 105)
+    pdf.set_xy(14, sub_y + 1)
+    pdf.cell(W - 3, 4, f"Subtotal:  ${sub:,.2f}", ln=True, align="R")
+    pdf.ln(5)
 
 
-def _items_table(items: list, subtotal: float) -> str:
-    rows = "".join(_item_row(i) for i in items)
-    return f"""<table>
-  <thead><tr>
-    <th style="width:32%">Product</th>
-    <th>Size</th>
-    <th>Unit</th>
-    <th class="num">Qty</th>
-    <th class="num">Btl/Unit</th>
-    <th class="num">Total Btl</th>
-    <th class="num">Unit Price</th>
-    <th class="num">Line Total</th>
-  </tr></thead>
-  <tbody>
-    {rows}
-    <tr class="subtotal-row">
-      <td colspan="7" style="text-align:right;color:#475569;font-size:11px;">Subtotal</td>
-      <td class="num">${subtotal:,.2f}</td>
-    </tr>
-  </tbody>
-</table>"""
+def _item_row(pdf, item: dict, cols, col_widths, row_idx: int, W: float) -> None:
+    ROW_H = 6.5
+    if pdf.get_y() + ROW_H > pdf.h - 20:
+        pdf.add_page()
 
-
-def _item_row(item: dict) -> str:
-    status = item.get("price_status", "")
-    badge = ""
-    if status == "DEAL":
-        badge = '<span class="badge badge-deal">DEAL</span>'
-    elif status == "HOLD":
-        badge = '<span class="badge badge-hold">HOLD</span>'
-    elif status == "RECOVERY_DEAL":
-        badge = '<span class="badge badge-rdeal">BEST DEAL</span>'
-
-    name = _esc(item.get("product_name", ""))
-    sel_size = _esc(item.get("unit_size") or item.get("selected_size") or "750ml")
-    sel_unit = _esc(item.get("selected_unit") or "Case")
-    qty = item.get("quantity", 0)
-    bpu = item.get("bottles_per_unit") or 1
+    status   = item.get("price_status", "")
+    name     = str(item.get("product_name", ""))
+    sel_size = str(item.get("unit_size") or item.get("selected_size") or "750ml")
+    sel_unit = str(item.get("selected_unit") or "Case")
+    qty      = item.get("quantity", 0)
+    bpu      = item.get("bottles_per_unit") or 1
     total_btl = item.get("total_bottles") or (qty * bpu)
-    unit_p = float(item.get("unit_price", 0) or 0)
-    line = float(item.get("line_total", 0) or unit_p * qty)
+    unit_p   = float(item.get("unit_price", 0) or 0)
+    line     = float(item.get("line_total", 0) or unit_p * qty)
 
-    # price change indicator
-    change = item.get("price_change", 0) or 0
-    change_html = ""
-    if change and change != 0:
-        arrow = "&#9660;" if change > 0 else "&#9650;"
-        color = "#16a34a" if change < 0 else "#dc2626"
-        change_html = f'<span style="color:{color};font-size:9px;margin-left:3px">{arrow}${abs(float(change)):.2f}</span>'
+    row_y = pdf.get_y()
+    if row_idx % 2 == 1:
+        pdf.set_fill_color(250, 250, 250)
+        pdf.rect(14, row_y, W, ROW_H, "F")
 
-    return f"""<tr>
-      <td>{name}{badge}</td>
-      <td><span class="size-pill">{sel_size}</span></td>
-      <td class="unit-dim">{sel_unit}</td>
-      <td class="num"><strong>{qty}</strong></td>
-      <td class="num unit-dim">{bpu}</td>
-      <td class="num">{total_btl:,}</td>
-      <td class="num">${unit_p:,.2f}{change_html}</td>
-      <td class="num">${line:,.2f}</td>
-    </tr>"""
+    values = [name, sel_size, sel_unit, str(qty), str(bpu),
+              f"{total_btl:,}", f"${unit_p:,.2f}", f"${line:,.2f}"]
+
+    pdf.set_font("Helvetica", "", 7.5)
+    x = 14
+    for i, ((_, _, align), cw) in enumerate(zip(cols, col_widths)):
+        val = values[i]
+        if i == 0:
+            # Truncate product name to fit column
+            max_ch = max(8, int(cw / 1.65))
+            val = val[:max_ch - 2] + ".." if len(val) > max_ch else val
+            if status == "DEAL":
+                pdf.set_text_color(*_GREEN)
+            elif status == "HOLD":
+                pdf.set_text_color(*_WARN)
+            else:
+                pdf.set_text_color(*_DARK)
+        elif i in (6, 7):
+            pdf.set_text_color(*_BLUE)
+        else:
+            pdf.set_text_color(*_DARK)
+
+        pdf.set_xy(x + 1, row_y + 1.2)
+        pdf.cell(cw - 2, ROW_H - 2, val, ln=False, align=align)
+        x += cw
+
+    pdf.ln(ROW_H)
 
 
-def _footer() -> str:
-    return f'<div class="footer">Generated by LiquorStore Pro &nbsp;·&nbsp; {datetime.utcnow().strftime("%Y-%m-%d")}</div>'
+# ── Public API ───────────────────────────────────────────────────────────────
+
+def generate_order_pdf(order_data: dict) -> bytes:
+    """Single-distributor PDF."""
+    items     = order_data.get("items", [])
+    subtotal  = float(order_data.get("subtotal", 0))
+    company   = order_data.get("company_name", "")
+    month     = order_data.get("order_month", "")
+
+    group = {"company_name": company, "items": items, "subtotal": subtotal, "is_misc": False}
+    try:
+        return _make_pdf(month, [group], is_single=True, single_company=company)
+    except Exception:
+        return _html_fallback_single(order_data)
 
 
-def _esc(s: str) -> str:
-    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+def generate_combined_pdf(order_month: str, groups: list[dict]) -> bytes:
+    """Master PDF (all distributors)."""
+    try:
+        return _make_pdf(order_month, groups)
+    except Exception:
+        return _html_fallback_combined(order_month, groups)
+
+
+# ── HTML fallback (last resort only) ─────────────────────────────────────────
+
+def _html_fallback_single(data: dict) -> bytes:
+    items    = data.get("items", [])
+    subtotal = float(data.get("subtotal", 0))
+    rows     = "".join(_html_row(i) for i in items)
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>PO — {data.get('company_name','')}</title>
+<style>body{{font-family:Arial,sans-serif;font-size:12px;}}
+table{{width:100%;border-collapse:collapse;}}
+th,td{{border:1px solid #ccc;padding:5px 8px;text-align:left;}}
+th{{background:#1a1a2e;color:#fff;}}</style></head>
+<body><h2>LiquorStore Pro — {data.get('company_name','')}</h2>
+<table><thead><tr><th>Product</th><th>Size</th><th>Unit</th>
+<th>Qty</th><th>Btl/Unit</th><th>Total Btl</th><th>Unit Price</th><th>Line Total</th></tr></thead>
+<tbody>{rows}</tbody></table>
+<p><strong>Total: ${subtotal:,.2f}</strong></p></body></html>""".encode("utf-8")
+
+
+def _html_fallback_combined(order_month: str, groups: list[dict]) -> bytes:
+    sections = ""
+    for g in groups:
+        rows = "".join(_html_row(i) for i in g["items"])
+        sections += f"<h3>{g['company_name']} — ${g['subtotal']:,.2f}</h3><table><thead><tr><th>Product</th><th>Size</th><th>Unit</th><th>Qty</th><th>Btl/Unit</th><th>Total Btl</th><th>Unit Price</th><th>Line Total</th></tr></thead><tbody>{rows}</tbody></table>"
+    grand = sum(g["subtotal"] for g in groups)
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Master PO — {order_month}</title>
+<style>body{{font-family:Arial,sans-serif;font-size:12px;}}
+table{{width:100%;border-collapse:collapse;margin-bottom:20px;}}
+th,td{{border:1px solid #ccc;padding:5px 8px;}}
+th{{background:#1a1a2e;color:#fff;}}</style></head>
+<body><h2>LiquorStore Pro — Master Order — {order_month}</h2>
+{sections}<h2>Grand Total: ${grand:,.2f}</h2></body></html>""".encode("utf-8")
+
+
+def _html_row(item: dict) -> str:
+    qty  = item.get("quantity", 0)
+    bpu  = item.get("bottles_per_unit") or 1
+    btl  = item.get("total_bottles") or (qty * bpu)
+    up   = float(item.get("unit_price", 0) or 0)
+    line = float(item.get("line_total", 0) or up * qty)
+    name = str(item.get("product_name", "")).replace("&", "&amp;").replace("<", "&lt;")
+    return (f"<tr><td>{name}</td>"
+            f"<td>{item.get('unit_size') or item.get('selected_size','750ml')}</td>"
+            f"<td>{item.get('selected_unit','Case')}</td>"
+            f"<td>{qty}</td><td>{bpu}</td><td>{btl:,}</td>"
+            f"<td>${up:,.2f}</td><td>${line:,.2f}</td></tr>")

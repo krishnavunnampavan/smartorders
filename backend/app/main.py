@@ -161,8 +161,11 @@ async def lifespan(app: FastAPI):
     _run_migrations()    # alembic upgrade head (stamps pre-alembic DBs first)
     _ensure_columns()    # ADD COLUMN IF NOT EXISTS failsafe for pack/unit_price/case_price
     _seed_products()     # upsert 5,083 products from seed JSON
-    # Start optional Redis listener for multi-worker cart sync
-    asyncio.create_task(ws_cart_router.redis_listener())
+    # Start optional Redis listener (no-op when REDIS_URL is unset)
+    try:
+        asyncio.create_task(ws_cart_router.redis_listener())
+    except Exception:
+        pass
     yield
 
 

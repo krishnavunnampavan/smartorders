@@ -159,7 +159,10 @@ async def add_item_to_cart(
         item_dict = cart_item_to_dict(existing)
         _log(db, cart.id, "updated", pid, existing.product_name, old_qty, quantity,
              existing.selected_size, selected_size, added_by)
-        await broadcast_event({"type": "ITEM_UPDATED", "item": item_dict})
+        try:
+            await broadcast_event({"type": "ITEM_UPDATED", "item": item_dict})
+        except Exception:
+            pass
     else:
         new_item = CartItem(
             cart_id          = cart.id,
@@ -187,7 +190,10 @@ async def add_item_to_cart(
         db.refresh(new_item)
         item_dict = cart_item_to_dict(new_item)
         _log(db, cart.id, "added", pid, new_item.product_name, None, quantity, None, selected_size, added_by)
-        await broadcast_event({"type": "ITEM_ADDED", "item": item_dict})
+        try:
+            await broadcast_event({"type": "ITEM_ADDED", "item": item_dict})
+        except Exception:
+            pass
 
     cart.updated_at = datetime.utcnow()
     db.commit()
@@ -229,7 +235,10 @@ async def update_cart_item(
     item_dict = cart_item_to_dict(item)
     _log(db, item.cart_id, "updated", item.product_id, item.product_name,
          old_qty, item.quantity, old_size, item.selected_size, updated_by)
-    await broadcast_event({"type": "ITEM_UPDATED", "item": item_dict})
+    try:
+        await broadcast_event({"type": "ITEM_UPDATED", "item": item_dict})
+    except Exception:
+        pass
 
     cart = db.get(ActiveCart, item.cart_id)
     if cart:
@@ -261,7 +270,10 @@ async def remove_cart_item(db: Session, item_id: str, removed_by: str = "manager
         cart.updated_at = datetime.utcnow()
 
     db.commit()
-    await broadcast_event({"type": "ITEM_REMOVED", "item_id": item_id})
+    try:
+        await broadcast_event({"type": "ITEM_REMOVED", "item_id": item_id})
+    except Exception:
+        pass
 
 
 async def clear_cart(db: Session, cleared_by: str = "manager") -> None:
@@ -273,7 +285,10 @@ async def clear_cart(db: Session, cleared_by: str = "manager") -> None:
     _log(db, cart.id, "cleared", None, None, None, None, None, None, cleared_by)
     cart.updated_at = datetime.utcnow()
     db.commit()
-    await broadcast_event({"type": "CART_CLEARED"})
+    try:
+        await broadcast_event({"type": "CART_CLEARED"})
+    except Exception:
+        pass
 
 
 async def submit_cart_to_order(db: Session, submitted_by: str = "manager") -> dict:
@@ -348,7 +363,10 @@ async def submit_cart_to_order(db: Session, submitted_by: str = "manager") -> di
     db.commit()
 
     _log(db, cart.id, "submitted", None, None, None, None, None, None, submitted_by)
-    await broadcast_event({"type": "CART_CLEARED"})
-    await broadcast_event({"type": "CART_SUBMITTED", "order_id": str(order.id)})
+    try:
+        await broadcast_event({"type": "CART_CLEARED"})
+        await broadcast_event({"type": "CART_SUBMITTED", "order_id": str(order.id)})
+    except Exception:
+        pass
 
     return {"order_id": str(order.id), "order_number": str(order.id)[:8].upper()}
