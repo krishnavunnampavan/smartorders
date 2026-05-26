@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -156,3 +157,24 @@ def add_alias(product_id: UUID, alias: str, db: Session = Depends(get_db)):
     from app.utils.fuzzy_match import save_alias
     save_alias(db, str(product_id), alias)
     return {"ok": True}
+
+
+@router.post("/refresh-catalog")
+def refresh_catalog(db: Session = Depends(get_db)):
+    """Fix product names/spellings, populate brands, deduplicate size variants, insert missing canonical products."""
+    from app.services.product_enrichment import enrich_products
+    stats = enrich_products(db)
+    return {"ok": True, **stats}
+
+
+class BrandAssignBody(BaseModel):
+    brand: str
+    company_id: UUID
+
+
+@router.post("/assign-brand-company")
+def assign_brand_company(body: BrandAssignBody, db: Session = Depends(get_db)):
+    """Assign a company to every active product of a given brand."""
+    from app.services.product_enrichment import assign_brand_company as _assign
+    updated = _assign(db, body.brand, body.company_id)
+    return {"ok": True, "updated": updated}

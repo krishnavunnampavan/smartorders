@@ -250,25 +250,23 @@ function UploadZone({ companies, onUploadDone }) {
   const [companyId, setCompanyId] = useState('')
   const [month, setMonth] = useState(thisMonth().slice(0, 7))
   const [uploading, setUploading] = useState(false)
-  const [autoCompany, setAutoCompany] = useState(null)
+
+  const ready = !!companyId && !uploading
 
   const onDrop = async (files) => {
+    if (!companyId) {
+      toast.error('Please select a distributor before uploading')
+      return
+    }
     const file = files[0]
     if (!file) return
-    setAutoCompany(null)
     setUploading(true)
     try {
       const form = new FormData()
-      if (companyId) form.append('company_id', companyId)
+      form.append('company_id', companyId)
       form.append('upload_month', month + '-01')
       form.append('file', file)
       const { data } = await client.post('/catalog/upload', form)
-      if (data.auto_company) {
-        setAutoCompany(data.auto_company)
-        toast.success(
-          `Auto-detected: ${data.auto_company.name}${data.auto_company.was_created ? ' (new company created)' : ''}`
-        )
-      }
       toast.success(`Parsed ${data.items_parsed} items, matched ${data.items_matched}`)
       onUploadDone(data.company_id || companyId, month + '-01')
     } catch {
@@ -280,6 +278,7 @@ function UploadZone({ companies, onUploadDone }) {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    disabled: !ready,
     accept: {
       'application/pdf': [], 'image/*': [],
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': [],
@@ -288,45 +287,91 @@ function UploadZone({ companies, onUploadDone }) {
     maxFiles: 1,
   })
 
+  const selectedCompany = companies?.find((c) => c.id === companyId)
+
   return (
     <div className="glass-card p-4 mb-5">
-      <h2 className="text-[#e6edf3] font-semibold mb-1">Upload Catalog</h2>
-      <p className="text-[#8b949e] text-xs mb-4">
-        Company is auto-detected from the catalog — or select one manually.
-      </p>
-      <div className="flex flex-col sm:flex-row gap-3 mb-4">
-        <select className="input-field flex-1" value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
-          <option value="">Auto-detect company from catalog…</option>
+      <h2 className="text-[#e6edf3] font-semibold mb-4">Upload Catalog</h2>
+
+      {/* Step 1 — Distributor */}
+      <div className="mb-4">
+        <label className="flex items-center gap-1.5 text-xs font-medium mb-1.5">
+          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+            companyId ? 'bg-green-500 text-white' : 'bg-[#58a6ff] text-white'
+          }`}>1</span>
+          <span className={companyId ? 'text-green-400' : 'text-[#58a6ff]'}>Select Distributor *</span>
+        </label>
+        <select
+          className={`input-field w-full ${!companyId ? 'border-[#58a6ff]/60 ring-1 ring-[#58a6ff]/30' : 'border-green-700/50'}`}
+          value={companyId}
+          onChange={(e) => setCompanyId(e.target.value)}
+        >
+          <option value="">— Choose a distributor —</option>
           {companies?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <input type="month" className="input-field sm:w-44" value={month} onChange={(e) => setMonth(e.target.value)} />
+        {!companyId && (
+          <p className="text-[#58a6ff] text-xs mt-1">Select which company this catalog is from</p>
+        )}
       </div>
 
-      {autoCompany && (
-        <div className="mb-3 p-3 rounded-lg bg-green-900/20 border border-green-800/50 text-sm flex items-center gap-2">
-          <CheckCircle size={15} className="text-green-400 shrink-0" />
-          <span className="text-green-300">
-            Auto-detected: <strong>{autoCompany.name}</strong>
-            {autoCompany.was_created && ' — new company created'}
-          </span>
-        </div>
-      )}
+      {/* Step 2 — Month */}
+      <div className="mb-4">
+        <label className="flex items-center gap-1.5 text-xs font-medium mb-1.5">
+          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+            companyId ? 'bg-[#58a6ff] text-white' : 'bg-[rgba(48,54,61,0.8)] text-[#8b949e]'
+          }`}>2</span>
+          <span className={companyId ? 'text-[#e6edf3]' : 'text-[#8b949e]'}>Select Month</span>
+        </label>
+        <input
+          type="month"
+          className="input-field w-full sm:w-52"
+          value={month}
+          onChange={(e) => setMonth(e.target.value)}
+          disabled={!companyId}
+        />
+      </div>
 
-      <div
-        {...getRootProps()}
-        className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
-          isDragActive ? 'border-[#58a6ff] bg-blue-500/10' : 'border-[rgba(48,54,61,0.8)] hover:border-[#58a6ff]/50'
-        } ${uploading ? 'opacity-50 pointer-events-none' : ''}`}
-      >
-        <input {...getInputProps()} />
-        {uploading
-          ? <div className="flex items-center justify-center gap-3"><LoadingSpinner size={20} /><span className="text-[#8b949e] text-sm">Parsing catalog with AI…</span></div>
-          : <>
+      {/* Step 3 — Drop file */}
+      <div>
+        <label className="flex items-center gap-1.5 text-xs font-medium mb-1.5">
+          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+            ready ? 'bg-[#58a6ff] text-white' : 'bg-[rgba(48,54,61,0.8)] text-[#8b949e]'
+          }`}>3</span>
+          <span className={ready ? 'text-[#e6edf3]' : 'text-[#8b949e]'}>Upload Catalog File</span>
+        </label>
+        <div
+          {...getRootProps()}
+          className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
+            !ready
+              ? 'border-[rgba(48,54,61,0.4)] opacity-40 cursor-not-allowed'
+              : isDragActive
+                ? 'border-[#58a6ff] bg-blue-500/10 cursor-pointer'
+                : 'border-[rgba(48,54,61,0.8)] hover:border-[#58a6ff]/50 cursor-pointer'
+          }`}
+        >
+          <input {...getInputProps()} />
+          {uploading ? (
+            <div className="flex items-center justify-center gap-3">
+              <LoadingSpinner size={20} />
+              <span className="text-[#8b949e] text-sm">
+                Parsing {selectedCompany?.name} catalog with AI…
+              </span>
+            </div>
+          ) : !companyId ? (
+            <>
               <Upload size={26} className="mx-auto mb-2 text-[#8b949e]" />
-              <p className="text-[#e6edf3] text-sm font-medium">{isDragActive ? 'Drop it here' : 'Drop catalog here or tap to browse'}</p>
+              <p className="text-[#8b949e] text-sm">Select a distributor above to enable upload</p>
+            </>
+          ) : (
+            <>
+              <Upload size={26} className="mx-auto mb-2 text-[#58a6ff]" />
+              <p className="text-[#e6edf3] text-sm font-medium">
+                {isDragActive ? 'Drop it here' : `Drop ${selectedCompany?.name} catalog here or tap to browse`}
+              </p>
               <p className="text-[#8b949e] text-xs mt-1">PDF, Excel, CSV, or Image</p>
             </>
-        }
+          )}
+        </div>
       </div>
     </div>
   )

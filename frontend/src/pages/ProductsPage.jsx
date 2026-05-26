@@ -11,6 +11,7 @@ import toast from 'react-hot-toast'
 import Layout from '../components/layout/Layout'
 import ConfirmModal from '../components/shared/ConfirmModal'
 import LoadingSpinner from '../components/shared/LoadingSpinner'
+import ProductModal from '../components/shared/ProductModal'
 import client from '../api/client'
 import { useDebounce } from '../hooks/useDebounce'
 import { formatCurrency } from '../utils/formatters'
@@ -22,11 +23,6 @@ const CATEGORIES = [
   'Non-Alcoholic', 'Tobacco', 'Spirits & Other',
 ]
 
-const SIZE_OPTS = ['50ml','100ml','187ml','200ml','375ml','500ml','750ml','1L','1.75L','3L','4L','5L','12 Oz','16 Oz','24 Oz','Other']
-const EMPTY_FORM = {
-  name: '', sku: '', barcode: '', category: '', brand: '', unit_size: '',
-  company_id: '', reorder_level: 2, current_stock: 0, aliases: [], notes: '', is_active: true,
-}
 
 const STATUS_DOT = {
   DEAL: 'bg-green-400',
@@ -181,114 +177,6 @@ function StockBadge({ current, reorder }) {
   return <span className="text-red-400 font-mono text-xs font-bold">{current}</span>
 }
 
-function ProductModal({ product, companies, onClose, onSave }) {
-  const [form, setForm] = useState(product ? {
-    name: product.name || '', sku: product.sku || '', barcode: product.barcode || '',
-    category: product.category || '', brand: product.brand || '', unit_size: product.unit_size || '',
-    company_id: product.company_id || '', reorder_level: product.reorder_level ?? 2,
-    current_stock: product.current_stock ?? 0, aliases: product.aliases || [], is_active: product.is_active ?? true,
-  } : { ...EMPTY_FORM })
-  const [aliasInput, setAliasInput] = useState('')
-
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
-  const addAlias = () => {
-    const a = aliasInput.trim().toLowerCase()
-    if (a && !form.aliases.includes(a)) set('aliases', [...form.aliases, a])
-    setAliasInput('')
-  }
-  const submit = () => {
-    if (!form.name.trim()) { toast.error('Product name is required'); return }
-    const body = { ...form }
-    if (!body.company_id) delete body.company_id
-    onSave(body)
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
-      <div className="glass-card w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-[#e6edf3] font-semibold text-lg">{product ? 'Edit Product' : 'Add Product'}</h2>
-          <button onClick={onClose} className="text-[#8b949e] hover:text-[#e6edf3]"><X size={20} /></button>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="col-span-2">
-            <label className="block text-[#8b949e] text-xs mb-1">Product Name *</label>
-            <input className="input-field" value={form.name} onChange={(e) => set('name', e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-[#8b949e] text-xs mb-1">SKU</label>
-            <input className="input-field" value={form.sku} onChange={(e) => set('sku', e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-[#8b949e] text-xs mb-1">UPC / Barcode</label>
-            <input className="input-field" value={form.barcode} onChange={(e) => set('barcode', e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-[#8b949e] text-xs mb-1">Brand</label>
-            <input className="input-field" value={form.brand} onChange={(e) => set('brand', e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-[#8b949e] text-xs mb-1">Category</label>
-            <select className="input-field" value={form.category} onChange={(e) => set('category', e.target.value)}>
-              <option value="">Select category…</option>
-              {CATEGORIES.filter((c) => c !== 'All').map((c) => <option key={c}>{c}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[#8b949e] text-xs mb-1">Size</label>
-            <select className="input-field" value={form.unit_size} onChange={(e) => set('unit_size', e.target.value)}>
-              <option value="">Select size…</option>
-              {SIZE_OPTS.map((s) => <option key={s}>{s}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[#8b949e] text-xs mb-1">Distributor</label>
-            <select className="input-field" value={form.company_id} onChange={(e) => set('company_id', e.target.value)}>
-              <option value="">Unassigned</option>
-              {companies?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[#8b949e] text-xs mb-1">Reorder Level</label>
-            <input type="number" min={0} className="input-field" value={form.reorder_level}
-              onChange={(e) => set('reorder_level', parseInt(e.target.value) || 0)} />
-          </div>
-          <div>
-            <label className="block text-[#8b949e] text-xs mb-1">Current Stock</label>
-            <input type="number" min={0} className="input-field" value={form.current_stock}
-              onChange={(e) => set('current_stock', parseInt(e.target.value) || 0)} />
-          </div>
-          <div className="col-span-2">
-            <label className="block text-[#8b949e] text-xs mb-1">Aliases (for voice/AI matching)</label>
-            <div className="flex gap-2 mb-2">
-              <input className="input-field flex-1" placeholder='"henny", "jack"'
-                value={aliasInput} onChange={(e) => setAliasInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addAlias())} />
-              <button className="btn-secondary px-3" onClick={addAlias}>Add</button>
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {form.aliases.map((a) => (
-                <span key={a} className="flex items-center gap-1 bg-[#21262d] text-[#8b949e] text-xs px-2 py-1 rounded-full">
-                  {a}
-                  <button onClick={() => set('aliases', form.aliases.filter((x) => x !== a))} className="hover:text-red-400">×</button>
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="col-span-2 flex items-center gap-2">
-            <input type="checkbox" id="is_active" checked={form.is_active}
-              onChange={(e) => set('is_active', e.target.checked)} className="accent-[#58a6ff]" />
-            <label htmlFor="is_active" className="text-[#8b949e] text-sm cursor-pointer">Active</label>
-          </div>
-        </div>
-        <div className="flex gap-3 mt-6">
-          <button className="btn-primary flex-1" onClick={submit}>{product ? 'Save Changes' : 'Create Product'}</button>
-          <button className="btn-secondary px-4" onClick={onClose}>Cancel</button>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function StockModal({ product, onClose, onSave }) {
   const [newStock, setNewStock] = useState(product.current_stock)
@@ -356,12 +244,36 @@ export default function ProductsPage() {
   })
 
   const saveMutation = useMutation({
-    mutationFn: (body) =>
-      editProduct?.id ? client.put(`/products/${editProduct.id}`, body) : client.post('/products', body),
-    onSuccess: () => {
+    mutationFn: async ({ body, propagateBrand }) => {
+      const res = await (editProduct?.id
+        ? client.put(`/products/${editProduct.id}`, body)
+        : client.post('/products', body))
+      if (propagateBrand && body.brand && body.company_id) {
+        await client.post('/products/assign-brand-company', {
+          brand: body.brand,
+          company_id: body.company_id,
+        })
+      }
+      return res
+    },
+    onSuccess: (_, { body, propagateBrand }) => {
       qc.invalidateQueries(['products'])
       setShowModal(false); setEditProduct(null)
-      toast.success(editProduct?.id ? 'Product updated' : 'Product created')
+      const base = editProduct?.id ? 'Product updated' : 'Product created'
+      toast.success(propagateBrand
+        ? `${base} — applied distributor to all ${body.brand} products`
+        : base)
+    },
+  })
+
+  const refreshCatalogMutation = useMutation({
+    mutationFn: () => client.post('/products/refresh-catalog'),
+    onSuccess: (res) => {
+      qc.invalidateQueries(['products'])
+      const { renamed, brand_set, deduped, inserted } = res.data
+      toast.success(
+        `Catalog fixed — ${renamed} renamed, ${brand_set} brands set, ${deduped} dupes removed, ${inserted} new products added`
+      )
     },
   })
 
@@ -411,6 +323,14 @@ export default function ProductsPage() {
             </button>
           )}
         </div>
+        <button
+          className="btn-secondary flex items-center gap-2 shrink-0 text-xs"
+          onClick={() => refreshCatalogMutation.mutate()}
+          disabled={refreshCatalogMutation.isLoading}
+          title="Fix product names, populate brands, remove size duplicates"
+        >
+          {refreshCatalogMutation.isLoading ? '…' : '✦'} Fix Catalog
+        </button>
         <button className="btn-primary flex items-center gap-2 shrink-0" onClick={openAdd}>
           <Plus size={15} /> Add Product
         </button>
@@ -542,9 +462,13 @@ export default function ProductsPage() {
       </div>
 
       {showModal && (
-        <ProductModal product={editProduct} companies={companies}
+        <ProductModal
+          product={editProduct}
+          companies={companies}
+          showBrandPropagate={!!editProduct?.id}
           onClose={() => { setShowModal(false); setEditProduct(null) }}
-          onSave={(body) => saveMutation.mutate(body)} />
+          onSave={(body, propagateBrand) => saveMutation.mutate({ body, propagateBrand })}
+        />
       )}
       {stockProduct && (
         <StockModal product={stockProduct} onClose={() => setStockProduct(null)}
