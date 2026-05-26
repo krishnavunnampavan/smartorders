@@ -36,6 +36,8 @@ def analytics_summary(db: Session = Depends(get_db)):
     company_totals: dict[str, float] = {}
     company_names: dict[str, str] = {}
     for split in splits:
+        if not split.company_id:
+            continue
         cid = str(split.company_id)
         if cid not in company_names:
             company = db.get(Company, split.company_id)

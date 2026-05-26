@@ -63,13 +63,14 @@ def _run_migrations():
 
 
 def _ensure_columns():
-    """Direct SQL fallback: add new product columns if they somehow still don't exist.
+    """Direct SQL fallback: add new columns if they somehow still don't exist.
 
     Uses ADD COLUMN IF NOT EXISTS (PG 9.6+) so it is always safe to run.
     """
     try:
         from sqlalchemy import text
         with _db.engine.connect() as conn:
+            # products columns
             conn.execute(text(
                 "ALTER TABLE products ADD COLUMN IF NOT EXISTS pack VARCHAR(50)"
             ))
@@ -78,6 +79,19 @@ def _ensure_columns():
             ))
             conn.execute(text(
                 "ALTER TABLE products ADD COLUMN IF NOT EXISTS case_price NUMERIC(10, 2)"
+            ))
+            # order_items columns added in migration 004 — guard for pre-migration DBs
+            conn.execute(text(
+                "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS selected_size VARCHAR(20)"
+            ))
+            conn.execute(text(
+                "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS selected_unit VARCHAR(30)"
+            ))
+            conn.execute(text(
+                "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS bottles_per_unit INTEGER DEFAULT 1"
+            ))
+            conn.execute(text(
+                "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS total_bottles INTEGER"
             ))
             conn.commit()
         print("[ensure_columns] OK.")

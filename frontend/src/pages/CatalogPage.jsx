@@ -150,7 +150,9 @@ function MonacoImport({ onDone }) {
       const { data } = await client.get('/scraper/preview?max_products=30')
       setPreview(data)
       setStatus('previewed')
-    } catch { setStatus(null) }
+    } catch {
+      setStatus(null)
+    }
   }
 
   const handleImport = async () => {
@@ -164,7 +166,9 @@ function MonacoImport({ onDone }) {
       setPreview(null)
       setStatus('done')
       onDone?.()
-    } catch { setStatus(null) }
+    } catch {
+      setStatus(null)
+    }
   }
 
   return (
@@ -267,7 +271,11 @@ function UploadZone({ companies, onUploadDone }) {
       }
       toast.success(`Parsed ${data.items_parsed} items, matched ${data.items_matched}`)
       onUploadDone(data.company_id || companyId, month + '-01')
-    } finally { setUploading(false) }
+    } catch {
+      // axios interceptor already shows the error toast; just reset state
+    } finally {
+      setUploading(false)
+    }
   }
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({

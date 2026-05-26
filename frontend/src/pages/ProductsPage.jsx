@@ -442,6 +442,7 @@ export default function ProductsPage() {
                       { k: 'category', label: 'Category' },
                       { k: 'current_stock', label: 'Stock' },
                       { k: 'reorder_level', label: 'Reorder At' },
+                      { k: 'unit_price', label: 'Buy Cost' },
                     ].map(({ k, label }) => (
                       <th key={k} className="text-left px-4 py-3 cursor-pointer hover:text-[#e6edf3] select-none"
                         onClick={() => sort(k)}>
@@ -465,6 +466,9 @@ export default function ProductsPage() {
                         <td className="px-4 py-3"><CategoryBadge category={p.category} /></td>
                         <td className="px-4 py-3"><StockBadge current={p.current_stock} reorder={p.reorder_level} /></td>
                         <td className="px-4 py-3 text-[#8b949e] text-xs">{p.reorder_level}</td>
+                        <td className="px-4 py-3 text-green-400 font-mono text-xs">
+                          {p.unit_price ? formatCurrency(p.unit_price) : '—'}
+                        </td>
                         <td className="px-4 py-3 text-[#8b949e] text-xs">
                           {companies?.find((c) => c.id === p.company_id)?.name || '—'}
                         </td>
@@ -496,7 +500,7 @@ export default function ProductsPage() {
                       {/* Expandable price history row */}
                       {expandedId === p.id && (
                         <tr className="border-b border-[rgba(48,54,61,0.3)] bg-[rgba(88,166,255,0.03)]">
-                          <td colSpan={8} className="px-0 py-0">
+                          <td colSpan={9} className="px-0 py-0">
                             <div className="border-t border-[#58a6ff]/10">
                               <div className="px-4 pt-3 pb-0">
                                 <p className="text-[#8b949e] text-xs font-medium uppercase tracking-wider mb-2">
@@ -512,7 +516,7 @@ export default function ProductsPage() {
                   ))}
                   {sorted.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="px-4 py-16 text-center text-[#8b949e]">
+                      <td colSpan={9} className="px-4 py-16 text-center text-[#8b949e]">
                         {search ? `No products matching "${search}"` : 'No products found.'}
                       </td>
                     </tr>
