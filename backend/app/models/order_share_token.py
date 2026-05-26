@@ -10,7 +10,7 @@ class OrderShareToken(Base):
     __tablename__ = "order_share_tokens"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    order_split_id = Column(GUID(), ForeignKey("order_splits.id"))
+    order_split_id = Column(GUID(), ForeignKey("order_splits.id", ondelete="CASCADE"))
     token = Column(String(64), unique=True, nullable=False)
     expires_at = Column(DateTime)
     viewed_at = Column(DateTime)
