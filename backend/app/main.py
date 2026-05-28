@@ -93,6 +93,15 @@ def _ensure_columns():
             conn.execute(text(
                 "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS total_bottles INTEGER"
             ))
+            conn.execute(text(
+                "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS item_note TEXT"
+            ))
+            conn.execute(text(
+                "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS item_name_override VARCHAR(200)"
+            ))
+            conn.execute(text(
+                "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS is_struck BOOLEAN DEFAULT FALSE"
+            ))
             conn.commit()
         print("[ensure_columns] OK.")
     except Exception as exc:

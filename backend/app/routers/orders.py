@@ -81,6 +81,9 @@ def list_items(order_id: UUID, db: Session = Depends(get_db)):
             "total_bottles": item.total_bottles,
             "product_name": product.name if product else "Unknown Product",
             "company_name": company.name if company else None,
+            "item_note": item.item_note,
+            "item_name_override": item.item_name_override,
+            "is_struck": bool(item.is_struck),
         })
     return result
 
@@ -151,28 +154,41 @@ def update_item(order_id: UUID, item_id: UUID, body: OrderItemUpdate, db: Sessio
     if not item or str(item.order_id) != str(order_id):
         raise HTTPException(404, "Item not found")
 
-    product = db.get(Product, item.product_id)
-    try:
-        pack_str = str((product.pack if product else None) or "").strip()
-        case_pack = int(pack_str.split("/")[0]) if pack_str else 12
-    except (ValueError, AttributeError):
-        case_pack = 12
+    # Handle metadata-only fields (no pricing recalc needed)
+    if body.is_struck is not None:
+        item.is_struck = body.is_struck
+    if body.item_note is not None:
+        item.item_note = body.item_note
+    if body.item_name_override is not None:
+        item.item_name_override = body.item_name_override or None
+    if body.company_id is not None:
+        item.company_id = body.company_id
 
-    qty = body.quantity if body.quantity is not None else item.quantity
-    sel_size = body.selected_size or item.selected_size or "750ml"
-    sel_unit = body.selected_unit or item.selected_unit or "Case"
+    # Recalculate pricing only when qty/size/unit are being changed
+    pricing_fields = (body.quantity, body.selected_size, body.selected_unit, body.bottles_per_unit)
+    if any(f is not None for f in pricing_fields):
+        product = db.get(Product, item.product_id)
+        try:
+            pack_str = str((product.pack if product else None) or "").strip()
+            case_pack = int(pack_str.split("/")[0]) if pack_str else 12
+        except (ValueError, AttributeError):
+            case_pack = 12
 
-    # Re-derive base unit price from product
-    base_price = float(product.unit_price) if product and product.unit_price else None
-    pricing = calculate_effective_price(base_price, sel_size, sel_unit, qty, case_pack)
+        qty = body.quantity if body.quantity is not None else item.quantity
+        sel_size = body.selected_size or item.selected_size or "750ml"
+        sel_unit = body.selected_unit or item.selected_unit or "Case"
 
-    item.quantity = qty
-    item.selected_size = sel_size
-    item.selected_unit = sel_unit
-    item.bottles_per_unit = pricing["bottles_per_unit"]
-    item.total_bottles = pricing["total_bottles"]
-    item.unit_price = pricing["unit_price"]
-    item.line_total = pricing["line_total"]
+        base_price = float(product.unit_price) if product and product.unit_price else None
+        pricing = calculate_effective_price(base_price, sel_size, sel_unit, qty, case_pack)
+
+        item.quantity = qty
+        item.selected_size = sel_size
+        item.selected_unit = sel_unit
+        item.bottles_per_unit = pricing["bottles_per_unit"]
+        item.total_bottles = pricing["total_bottles"]
+        item.unit_price = pricing["unit_price"]
+        item.line_total = pricing["line_total"]
+
     db.commit()
     db.refresh(item)
     return item

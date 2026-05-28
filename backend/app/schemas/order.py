@@ -21,6 +21,10 @@ class OrderItemUpdate(BaseModel):
     selected_size: Optional[str] = None
     selected_unit: Optional[str] = None
     bottles_per_unit: Optional[int] = None
+    company_id: Optional[UUID] = None
+    item_note: Optional[str] = None
+    item_name_override: Optional[str] = None
+    is_struck: Optional[bool] = None
 
 
 class OrderItemOut(BaseModel):
@@ -38,6 +42,9 @@ class OrderItemOut(BaseModel):
     selected_unit: Optional[str]
     bottles_per_unit: Optional[int]
     total_bottles: Optional[int]
+    item_note: Optional[str]
+    item_name_override: Optional[str]
+    is_struck: Optional[bool]
 
     model_config = {"from_attributes": True}
 

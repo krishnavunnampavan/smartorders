@@ -43,6 +43,9 @@ class OrderItem(Base):
     selected_unit = Column(String(30))
     bottles_per_unit = Column(Integer, default=1)
     total_bottles = Column(Integer)
+    item_note = Column(Text)
+    item_name_override = Column(String(200))
+    is_struck = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     order = relationship("Order", back_populates="items")

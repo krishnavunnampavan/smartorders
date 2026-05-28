@@ -1,13 +1,13 @@
 import { NavLink } from 'react-router-dom'
 import {
-  LayoutDashboard, ShoppingCart, BookOpen, Package, Settings,
+  LayoutDashboard, ShoppingCart, ClipboardList, Package, Settings,
 } from 'lucide-react'
 import clsx from 'clsx'
 
 const nav = [
   { to: '/', label: 'Home', icon: LayoutDashboard },
   { to: '/orders/new', label: 'Order', icon: ShoppingCart },
-  { to: '/catalog', label: 'Catalog', icon: BookOpen },
+  { to: '/orders', label: 'My Orders', icon: ClipboardList },
   { to: '/inventory', label: 'Stock', icon: Package },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
