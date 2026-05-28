@@ -74,6 +74,7 @@ class OrderSplitOut(BaseModel):
 
 class OrderOut(BaseModel):
     id: UUID
+    store_id: Optional[UUID] = None
     order_month: date
     status: str
     total_items: Optional[int]

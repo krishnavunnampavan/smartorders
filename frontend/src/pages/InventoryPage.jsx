@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, ShoppingCart, Zap, List, Plus, Edit2, Trash2,
-  Search, X, Package,
+  Search, X, Package, Upload, ChevronDown, ChevronUp, CheckCircle,
+  FileSpreadsheet, RefreshCw,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Layout from '../components/layout/Layout'
@@ -11,6 +12,7 @@ import ProductModal from '../components/shared/ProductModal'
 import client from '../api/client'
 import { useOrderStore } from '../store/orderStore'
 import { formatCurrency } from '../utils/formatters'
+import { useAuthStore } from '../store/authStore'
 
 // ── Quick Count Row ───────────────────────────────────────────────────────
 function QuickCountRow({ product }) {
@@ -63,6 +65,179 @@ function QuickCountRow({ product }) {
   )
 }
 
+// ── Store Inventory Upload Section ────────────────────────────────────────
+function StoreInventorySection({ storeId }) {
+  const qc = useQueryClient()
+  const fileRef = useRef()
+  const [expanded, setExpanded] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [search, setSearch] = useState('')
+
+  const { data: inv, refetch } = useQuery({
+    queryKey: ['store-inventory', storeId],
+    queryFn: () => client.get(`/stores/${storeId}/inventory`).then((r) => r.data),
+    enabled: expanded,
+  })
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const { data } = await client.post(`/stores/${storeId}/inventory/upload`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      toast.success(
+        `Upload complete: ${data.unique_items} items, ${data.duplicates_removed} duplicates removed, ${data.matched_products} matched`
+      )
+      refetch()
+      if (!expanded) setExpanded(true)
+    } catch (err) {
+      toast.error('Upload failed — check the file format')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  const filteredItems = (inv?.items || []).filter((item) =>
+    !search || (item.product_name || '').toLowerCase().includes(search.toLowerCase()) ||
+    (item.sku || '').toLowerCase().includes(search.toLowerCase()) ||
+    (item.category || '').toLowerCase().includes(search.toLowerCase())
+  )
+
+  return (
+    <div className="glass-card overflow-hidden mb-4">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4">
+        <button
+          className="flex items-center gap-2 flex-1 text-left"
+          onClick={() => setExpanded(!expanded)}
+        >
+          <FileSpreadsheet size={16} className="text-[#58a6ff]" />
+          <div>
+            <span className="text-[#e6edf3] text-sm font-medium">Store Inventory List</span>
+            {inv?.upload && (
+              <span className="ml-2 text-[#8b949e] text-xs">
+                {inv.items.length} items · last uploaded {new Date(inv.upload.uploaded_at).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+          {expanded ? <ChevronUp size={14} className="text-[#8b949e] ml-auto" /> : <ChevronDown size={14} className="text-[#8b949e] ml-auto" />}
+        </button>
+
+        <div className="flex items-center gap-2 ml-3 shrink-0">
+          <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleFileChange} />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[#58a6ff]/15 text-[#58a6ff] hover:bg-[#58a6ff]/25 transition-colors disabled:opacity-50"
+          >
+            {uploading
+              ? <><RefreshCw size={12} className="animate-spin" /> Uploading…</>
+              : <><Upload size={12} /> Upload Inventory</>}
+          </button>
+        </div>
+      </div>
+
+      {/* Upload stats */}
+      {expanded && inv?.upload && (
+        <div className="px-4 pb-3 border-t border-[rgba(48,54,61,0.4)]">
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 py-3">
+            <div className="text-center">
+              <p className="text-[#e6edf3] font-bold text-lg">{inv.upload.total_rows}</p>
+              <p className="text-[#8b949e] text-[10px]">Total Rows</p>
+            </div>
+            <div className="text-center">
+              <p className="text-red-400 font-bold text-lg">{inv.upload.duplicates_removed}</p>
+              <p className="text-[#8b949e] text-[10px]">Duplicates Removed</p>
+            </div>
+            <div className="text-center">
+              <p className="text-green-400 font-bold text-lg">{inv.upload.matched_products}</p>
+              <p className="text-[#8b949e] text-[10px]">Catalog Matched</p>
+            </div>
+            <div className="text-center hidden sm:block">
+              <p className="text-[#e6edf3] font-bold text-lg">{inv.items.length}</p>
+              <p className="text-[#8b949e] text-[10px]">Unique Items</p>
+            </div>
+          </div>
+
+          {/* Search */}
+          <div className="relative mb-3">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e]" />
+            <input
+              className="w-full bg-[#0d1117] border border-[rgba(48,54,61,0.6)] rounded-lg pl-8 pr-3 py-2 text-sm text-[#e6edf3] focus:outline-none focus:border-[#58a6ff]/50"
+              placeholder="Search uploaded items…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          {/* Items table */}
+          <div className="max-h-72 overflow-y-auto rounded-lg border border-[rgba(48,54,61,0.5)]">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-[rgba(22,27,34,0.8)] sticky top-0">
+                <tr>
+                  <th className="px-3 py-2 text-[#8b949e] font-medium">Product</th>
+                  <th className="px-3 py-2 text-[#8b949e] font-medium">SKU</th>
+                  <th className="px-3 py-2 text-[#8b949e] font-medium">Size</th>
+                  <th className="px-3 py-2 text-[#8b949e] font-medium">Category</th>
+                  <th className="px-3 py-2 text-[#8b949e] font-medium text-right">Qty</th>
+                  <th className="px-3 py-2 text-[#8b949e] font-medium text-center">Matched</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredItems.map((item) => (
+                  <tr key={item.id} className="border-t border-[rgba(48,54,61,0.3)] hover:bg-[rgba(48,54,61,0.15)]">
+                    <td className="px-3 py-2 text-[#e6edf3] font-medium max-w-[200px] truncate">{item.product_name}</td>
+                    <td className="px-3 py-2 text-[#8b949e] font-mono">{item.sku || '—'}</td>
+                    <td className="px-3 py-2 text-[#8b949e]">{item.unit_size || '—'}</td>
+                    <td className="px-3 py-2 text-[#8b949e] max-w-[120px] truncate">{item.category || '—'}</td>
+                    <td className="px-3 py-2 text-right font-mono text-[#e6edf3]">{item.quantity}</td>
+                    <td className="px-3 py-2 text-center">
+                      {item.product_id
+                        ? <CheckCircle size={12} className="text-green-400 inline" />
+                        : <span className="text-[#8b949e]">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {filteredItems.length === 0 && (
+              <div className="text-center py-6 text-[#8b949e] text-xs">
+                {search ? 'No items match your search.' : 'No inventory uploaded yet.'}
+              </div>
+            )}
+          </div>
+
+          <p className="text-[#8b949e] text-[10px] mt-2">
+            Supported formats: CSV, Excel (.xlsx, .xls). Columns: name, sku, quantity, size, category.
+          </p>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {expanded && !inv?.upload && !uploading && (
+        <div className="px-4 pb-5 border-t border-[rgba(48,54,61,0.4)]">
+          <div className="text-center py-8">
+            <FileSpreadsheet size={32} className="text-[#8b949e] mx-auto mb-3 opacity-50" />
+            <p className="text-[#8b949e] text-sm mb-3">No inventory uploaded for this store yet.</p>
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="flex items-center gap-2 mx-auto text-sm px-4 py-2 rounded-lg bg-[#58a6ff]/15 text-[#58a6ff] hover:bg-[#58a6ff]/25 transition-colors"
+            >
+              <Upload size={14} /> Upload Your First Inventory
+            </button>
+            <p className="text-[#8b949e] text-xs mt-3">CSV or Excel — columns: name, sku, quantity, size, category</p>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────
 export default function InventoryPage() {
   const qc = useQueryClient()
@@ -72,6 +247,7 @@ export default function InventoryPage() {
   const [showModal, setShowModal] = useState(false)
   const [deleteId, setDeleteId] = useState(null)
   const { addResolvedItem } = useOrderStore()
+  const { storeId } = useAuthStore()
 
   const { data: products, isLoading } = useQuery({
     queryKey: ['products'],
@@ -133,6 +309,9 @@ export default function InventoryPage() {
 
   return (
     <Layout title="Inventory">
+      {/* Per-store inventory upload */}
+      {storeId && <StoreInventorySection storeId={storeId} />}
+
       {/* Low stock alerts */}
       {alerts?.length > 0 && (
         <div className="glass-card p-4 mb-4 border border-red-800/50 bg-red-900/10">

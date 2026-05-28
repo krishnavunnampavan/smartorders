@@ -1,6 +1,7 @@
 from datetime import date
+from typing import Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Order, OrderItem, Product, PriceHistory
@@ -15,14 +16,39 @@ from app.utils.size_prices import calculate_effective_price, get_size_options, g
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
 
+def _resolve_store_id(key: Optional[str], db: Session) -> Optional[str]:
+    """Return store_id for the given key, or None if owner (sees all)."""
+    if not key:
+        return None
+    from app.models.store import Store
+    store = db.query(Store).filter_by(access_key=key, is_active=True).first()
+    if not store:
+        return None
+    if store.is_owner_platform:
+        return None  # owner sees all
+    return str(store.id)
+
+
 @router.get("", response_model=list[OrderOut])
-def list_orders(db: Session = Depends(get_db)):
-    return db.query(Order).order_by(Order.created_at.desc()).all()
+def list_orders(
+    x_store_key: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Order).order_by(Order.created_at.desc())
+    store_id = _resolve_store_id(x_store_key, db)
+    if store_id:
+        q = q.filter((Order.store_id == store_id) | (Order.store_id == None))
+    return q.all()
 
 
 @router.post("", response_model=OrderOut, status_code=201)
-def create_order(body: OrderCreate, db: Session = Depends(get_db)):
-    order = Order(**body.model_dump())
+def create_order(
+    body: OrderCreate,
+    x_store_key: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    store_id = _resolve_store_id(x_store_key, db)
+    order = Order(**body.model_dump(), store_id=store_id)
     db.add(order)
     db.commit()
     db.refresh(order)

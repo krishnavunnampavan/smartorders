@@ -16,6 +16,8 @@ from app.routers import (
 )
 from app.routers import cart as cart_router
 from app.routers import ws_cart as ws_cart_router
+from app.routers import auth as auth_router
+from app.routers import stores as stores_router
 
 # ALLOWED_ORIGINS env var: comma-separated list of allowed origins.
 _origins_env = os.getenv("ALLOWED_ORIGINS", "*")
@@ -102,6 +104,10 @@ def _ensure_columns():
             conn.execute(text(
                 "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS is_struck BOOLEAN DEFAULT FALSE"
             ))
+            # orders store_id for multi-store support
+            conn.execute(text(
+                "ALTER TABLE orders ADD COLUMN IF NOT EXISTS store_id UUID"
+            ))
             conn.commit()
         print("[ensure_columns] OK.")
     except Exception as exc:
@@ -178,11 +184,38 @@ def _seed_products():
         print(f"[seed] warning: {exc}")
 
 
+def _seed_stores():
+    """Ensure the owner platform entry and Monaco's store exist in the DB."""
+    try:
+        from app.models.store import Store
+        db = _db.SessionLocal()
+        try:
+            def upsert_store(access_key, name, is_owner=False):
+                existing = db.query(Store).filter_by(access_key=access_key).first()
+                if not existing:
+                    db.add(Store(
+                        name=name,
+                        access_key=access_key,
+                        is_owner_platform=is_owner,
+                        is_active=True,
+                    ))
+                    db.commit()
+                    print(f"[seed_stores] Created store '{name}' with key {access_key}")
+
+            upsert_store("9542", "Platform Owner", is_owner=True)
+            upsert_store("2178", "MONACO'S WINE AND LIQUOR")
+        finally:
+            db.close()
+    except Exception as exc:
+        print(f"[seed_stores] warning: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import asyncio
     _run_migrations()    # alembic upgrade head (stamps pre-alembic DBs first)
     _ensure_columns()    # ADD COLUMN IF NOT EXISTS failsafe for pack/unit_price/case_price
+    _seed_stores()       # ensure owner + Monaco's store records exist
     _seed_products()     # upsert 5,083 products from seed JSON
     # Start optional Redis listener (no-op when REDIS_URL is unset)
     try:
@@ -214,6 +247,8 @@ for router_module in [
 
 app.include_router(cart_router.router)
 app.include_router(ws_cart_router.router)
+app.include_router(auth_router.router)
+app.include_router(stores_router.router)
 
 
 @app.get("/health")

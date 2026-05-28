@@ -10,6 +10,7 @@ class Order(Base):
     __tablename__ = "orders"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    store_id = Column(GUID(), nullable=True)  # null = legacy / Monaco's
     order_month = Column(Date, nullable=False)
     status = Column(String(30), default="draft")
     total_items = Column(Integer)

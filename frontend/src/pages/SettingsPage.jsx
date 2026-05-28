@@ -5,7 +5,8 @@ import toast from 'react-hot-toast'
 import Layout from '../components/layout/Layout'
 import client from '../api/client'
 
-const TABS = ['API Keys', 'Store Info', 'Order Rules']
+// API Keys tab is owner-only; store users only see Store Info and Order Rules
+const STORE_TABS = ['Store Info', 'Order Rules']
 
 function StatusIcon({ status }) {
   if (status === 'connected') return <CheckCircle size={16} className="text-green-400" />
@@ -216,12 +217,12 @@ function OrderRulesTab() {
 }
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState('API Keys')
+  const [tab, setTab] = useState('Store Info')
 
   return (
     <Layout title="Settings">
       <div className="flex gap-1 mb-8 p-1 rounded-lg bg-[#161b22] inline-flex">
-        {TABS.map((t) => (
+        {STORE_TABS.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -236,7 +237,6 @@ export default function SettingsPage() {
         ))}
       </div>
 
-      {tab === 'API Keys' && <APIKeysTab />}
       {tab === 'Store Info' && <StoreInfoTab />}
       {tab === 'Order Rules' && <OrderRulesTab />}
     </Layout>
