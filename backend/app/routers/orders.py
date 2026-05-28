@@ -295,7 +295,7 @@ def _item_to_dict(db, item: OrderItem) -> dict:
     from app.models.company import Company
     product = db.get(Product, item.product_id)
     return {
-        "product_name": product.name if product else "Unknown Product",
+        "product_name": item.item_name_override or (product.name if product else "Unknown Product"),
         "sku": product.sku if product else "",
         "unit_size": item.selected_size or (product.unit_size if product else ""),
         "pack": product.pack if product else "",
@@ -307,6 +307,8 @@ def _item_to_dict(db, item: OrderItem) -> dict:
         "line_total": float(item.line_total or 0),
         "price_status": item.price_status or "",
         "price_change": float(item.price_change or 0),
+        "is_struck": bool(item.is_struck),
+        "item_note": item.item_note or "",
     }
 
 
@@ -349,54 +351,13 @@ def _build_order_groups(db, order_id) -> list[dict]:
 @router.get("/{order_id}/combined-pdf")
 def combined_order_pdf(order_id: UUID, db: Session = Depends(get_db)):
     from fastapi.responses import Response
-    from app.models.company import Company
     from app.services.pdf_generator import generate_combined_pdf
 
     order = db.get(Order, order_id)
     if not order:
         raise HTTPException(404, "Order not found")
 
-    items = db.query(OrderItem).filter_by(order_id=order_id).all()
-
-    groups: dict[str, dict] = {}
-    misc_items: list[dict] = []
-
-    for item in items:
-        product = db.get(Product, item.product_id)
-        item_dict = {
-            "product_name": product.name if product else "Unknown Product",
-            "sku": product.sku if product else "",
-            "unit_size": product.unit_size if product else "",
-            "pack": product.pack if product else "",
-            "quantity": item.quantity,
-            "unit_price": float(item.unit_price or 0),
-            "line_total": float(item.line_total or 0),
-            "price_status": item.price_status or "",
-        }
-        if item.company_id:
-            cid = str(item.company_id)
-            if cid not in groups:
-                company = db.get(Company, item.company_id)
-                groups[cid] = {
-                    "company_name": company.name if company else "Unknown",
-                    "items": [],
-                    "subtotal": 0.0,
-                    "is_misc": False,
-                }
-            groups[cid]["items"].append(item_dict)
-            groups[cid]["subtotal"] += item_dict["line_total"]
-        else:
-            misc_items.append(item_dict)
-
-    result_groups = list(groups.values())
-    if misc_items:
-        result_groups.append({
-            "company_name": "Misc",
-            "items": misc_items,
-            "subtotal": sum(i["line_total"] for i in misc_items),
-            "is_misc": True,
-        })
-
+    result_groups = _build_order_groups(db, order_id)
     content = generate_combined_pdf(str(order.order_month), result_groups)
     is_html = content.startswith(b"<")
     ext = "html" if is_html else "pdf"

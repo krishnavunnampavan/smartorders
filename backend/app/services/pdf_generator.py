@@ -13,6 +13,8 @@ _WHITE      = (255, 255, 255)
 _STRIP_BG   = (248, 250, 252)
 _BORDER_CLR = (226, 232, 240)
 _SUB_LINE   = (203, 213, 225)
+_STRUCK_TXT = (180, 180, 180)   # light gray for struck-through items
+_STRUCK_BG  = (245, 245, 245)   # very light background for struck rows
 
 
 def _make_pdf(order_month: str, groups: list[dict], is_single: bool = False,
@@ -26,7 +28,10 @@ def _make_pdf(order_month: str, groups: list[dict], is_single: bool = False,
 
     W = pdf.w - 28  # usable content width
 
-    total_items   = sum(len(g["items"]) for g in groups)
+    all_items     = [i for g in groups for i in g["items"]]
+    total_items   = len(all_items)
+    struck_count  = sum(1 for i in all_items if i.get("is_struck"))
+    pending_count = total_items - struck_count
     grand_total   = sum(g["subtotal"] for g in groups)
     total_bottles = sum(
         sum(i.get("total_bottles") or i.get("quantity", 0) for i in g["items"])
@@ -53,10 +58,11 @@ def _make_pdf(order_month: str, groups: list[dict], is_single: bool = False,
 
     # ── Summary strip ─────────────────────────────────────────────────────────
     cells = [
-        ("Distributors", str(dist_count),       _BLUE),
-        ("Line Items",   str(total_items),       _DARK),
-        ("Total Bottles", f"{total_bottles:,}",  _DARK),
-        ("Order Value",  f"${grand_total:,.2f}", _BLUE),
+        ("Distributors", str(dist_count),        _BLUE),
+        ("Total Items",  str(total_items),        _DARK),
+        ("Pending",      str(pending_count),      _WARN),
+        ("Ordered",      str(struck_count),       _GREEN),
+        ("Order Value",  f"${grand_total:,.2f}",  _BLUE),
     ]
     cell_w = W / len(cells)
     strip_y = pdf.get_y()
@@ -73,7 +79,7 @@ def _make_pdf(order_month: str, groups: list[dict], is_single: bool = False,
         pdf.set_xy(x + 3, strip_y + 3)
         pdf.cell(cell_w - 6, 3.5, label.upper(), ln=False)
 
-        pdf.set_font("Helvetica", "B", 13)
+        pdf.set_font("Helvetica", "B", 11)
         pdf.set_text_color(*color)
         pdf.set_xy(x + 3, strip_y + 7.5)
         pdf.cell(cell_w - 6, 7, value, ln=False)
@@ -203,18 +209,24 @@ def _item_row(pdf, item: dict, cols, col_widths, row_idx: int, W: float) -> None
     if pdf.get_y() + ROW_H > pdf.h - 20:
         pdf.add_page()
 
-    status   = item.get("price_status", "")
-    name     = str(item.get("product_name", ""))
-    sel_size = str(item.get("unit_size") or item.get("selected_size") or "750ml")
-    sel_unit = str(item.get("selected_unit") or "Case")
-    qty      = item.get("quantity", 0)
-    bpu      = item.get("bottles_per_unit") or 1
+    is_struck = item.get("is_struck", False)
+    status    = item.get("price_status", "")
+    name      = str(item.get("product_name", ""))
+    sel_size  = str(item.get("unit_size") or item.get("selected_size") or "750ml")
+    sel_unit  = str(item.get("selected_unit") or "Case")
+    qty       = item.get("quantity", 0)
+    bpu       = item.get("bottles_per_unit") or 1
     total_btl = item.get("total_bottles") or (qty * bpu)
-    unit_p   = float(item.get("unit_price", 0) or 0)
-    line     = float(item.get("line_total", 0) or unit_p * qty)
+    unit_p    = float(item.get("unit_price", 0) or 0)
+    line      = float(item.get("line_total", 0) or unit_p * qty)
 
     row_y = pdf.get_y()
-    if row_idx % 2 == 1:
+
+    # Background: light gray for struck rows, alternating white/near-white for normal rows
+    if is_struck:
+        pdf.set_fill_color(*_STRUCK_BG)
+        pdf.rect(14, row_y, W, ROW_H, "F")
+    elif row_idx % 2 == 1:
         pdf.set_fill_color(250, 250, 250)
         pdf.rect(14, row_y, W, ROW_H, "F")
 
@@ -225,7 +237,10 @@ def _item_row(pdf, item: dict, cols, col_widths, row_idx: int, W: float) -> None
     x = 14
     for i, ((_, _, align), cw) in enumerate(zip(cols, col_widths)):
         val = values[i]
-        if i == 0:
+        if is_struck:
+            # All text in muted gray for struck items
+            pdf.set_text_color(*_STRUCK_TXT)
+        elif i == 0:
             # Truncate product name to fit column
             max_ch = max(8, int(cw / 1.65))
             val = val[:max_ch - 2] + ".." if len(val) > max_ch else val
@@ -240,9 +255,21 @@ def _item_row(pdf, item: dict, cols, col_widths, row_idx: int, W: float) -> None
         else:
             pdf.set_text_color(*_DARK)
 
+        # Truncate name for struck items too
+        if i == 0 and is_struck:
+            max_ch = max(8, int(cw / 1.65))
+            val = val[:max_ch - 2] + ".." if len(val) > max_ch else val
+
         pdf.set_xy(x + 1, row_y + 1.2)
         pdf.cell(cw - 2, ROW_H - 2, val, ln=False, align=align)
         x += cw
+
+    # Draw strikethrough line across the full row for struck items
+    if is_struck:
+        mid_y = row_y + ROW_H / 2
+        pdf.set_draw_color(*_STRUCK_TXT)
+        pdf.set_line_width(0.35)
+        pdf.line(14, mid_y, 14 + W, mid_y)
 
     pdf.ln(ROW_H)
 
@@ -307,14 +334,20 @@ th{{background:#1a1a2e;color:#fff;}}</style></head>
 
 
 def _html_row(item: dict) -> str:
-    qty  = item.get("quantity", 0)
-    bpu  = item.get("bottles_per_unit") or 1
-    btl  = item.get("total_bottles") or (qty * bpu)
-    up   = float(item.get("unit_price", 0) or 0)
-    line = float(item.get("line_total", 0) or up * qty)
-    name = str(item.get("product_name", "")).replace("&", "&amp;").replace("<", "&lt;")
-    return (f"<tr><td>{name}</td>"
-            f"<td>{item.get('unit_size') or item.get('selected_size','750ml')}</td>"
-            f"<td>{item.get('selected_unit','Case')}</td>"
-            f"<td>{qty}</td><td>{bpu}</td><td>{btl:,}</td>"
-            f"<td>${up:,.2f}</td><td>${line:,.2f}</td></tr>")
+    qty       = item.get("quantity", 0)
+    bpu       = item.get("bottles_per_unit") or 1
+    btl       = item.get("total_bottles") or (qty * bpu)
+    up        = float(item.get("unit_price", 0) or 0)
+    line      = float(item.get("line_total", 0) or up * qty)
+    is_struck = item.get("is_struck", False)
+    name      = str(item.get("product_name", "")).replace("&", "&amp;").replace("<", "&lt;")
+    style     = ' style="text-decoration:line-through;color:#aaa;"' if is_struck else ""
+    tag_o     = f'<span{style}>' if is_struck else ""
+    tag_c     = '</span>' if is_struck else ""
+    row_style = ' style="background:#f5f5f5;"' if is_struck else ""
+    return (f"<tr{row_style}>"
+            f"<td>{tag_o}{name}{tag_c}</td>"
+            f"<td>{tag_o}{item.get('unit_size') or item.get('selected_size','750ml')}{tag_c}</td>"
+            f"<td>{tag_o}{item.get('selected_unit','Case')}{tag_c}</td>"
+            f"<td>{tag_o}{qty}{tag_c}</td><td>{tag_o}{bpu}{tag_c}</td><td>{tag_o}{btl:,}{tag_c}</td>"
+            f"<td>{tag_o}${up:,.2f}{tag_c}</td><td>{tag_o}${line:,.2f}{tag_c}</td></tr>")
