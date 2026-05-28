@@ -64,6 +64,19 @@ def _run_migrations():
         print(f"[migrations] warning: {exc}")
 
 
+def _ensure_tables():
+    """Create any new tables that don't exist yet (stores, store_inventory_*).
+
+    Uses checkfirst=True so existing tables are never touched.
+    Called before _ensure_columns so the stores table exists for seeding.
+    """
+    try:
+        Base.metadata.create_all(bind=_db.engine, checkfirst=True)
+        print("[ensure_tables] OK.")
+    except Exception as exc:
+        print(f"[ensure_tables] warning: {exc}")
+
+
 def _ensure_columns():
     """Direct SQL fallback: add new columns if they somehow still don't exist.
 
@@ -185,14 +198,25 @@ def _seed_products():
 
 
 def _seed_stores():
-    """Ensure the owner platform entry and Monaco's store exist in the DB."""
+    """Ensure the owner platform (9542) and Monaco's store (2178) exist in the DB.
+
+    Uses upsert logic: creates the record if missing, updates name/flags if it exists.
+    Safe to run on every startup.
+    """
     try:
         from app.models.store import Store
         db = _db.SessionLocal()
         try:
             def upsert_store(access_key, name, is_owner=False):
                 existing = db.query(Store).filter_by(access_key=access_key).first()
-                if not existing:
+                if existing:
+                    # Ensure name and flags are correct even if record existed before
+                    existing.name = name
+                    existing.is_owner_platform = is_owner
+                    existing.is_active = True
+                    db.commit()
+                    print(f"[seed_stores] Verified store '{name}' (key {access_key})")
+                else:
                     db.add(Store(
                         name=name,
                         access_key=access_key,
@@ -200,10 +224,10 @@ def _seed_stores():
                         is_active=True,
                     ))
                     db.commit()
-                    print(f"[seed_stores] Created store '{name}' with key {access_key}")
+                    print(f"[seed_stores] Created store '{name}' (key {access_key})")
 
             upsert_store("9542", "Platform Owner", is_owner=True)
-            upsert_store("2178", "MONACO'S WINE AND LIQUOR")
+            upsert_store("2178", "MONACO'S WINE AND LIQUOR", is_owner=False)
         finally:
             db.close()
     except Exception as exc:
@@ -214,8 +238,9 @@ def _seed_stores():
 async def lifespan(app: FastAPI):
     import asyncio
     _run_migrations()    # alembic upgrade head (stamps pre-alembic DBs first)
+    _ensure_tables()     # create_all(checkfirst=True) — creates stores/inventory tables if missing
     _ensure_columns()    # ADD COLUMN IF NOT EXISTS failsafe for pack/unit_price/case_price
-    _seed_stores()       # ensure owner + Monaco's store records exist
+    _seed_stores()       # ensure owner (9542) + Monaco's (2178) store records exist
     _seed_products()     # upsert 5,083 products from seed JSON
     # Start optional Redis listener (no-op when REDIS_URL is unset)
     try:
